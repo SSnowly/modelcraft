@@ -1,0 +1,30 @@
+{
+    "format": "cadcraft-devshell",
+    "version": 1,
+    "app": {
+        "slug": "modelcraft",
+        "name": "ModelCraft",
+        "layer": "orange",
+        "role": "3D modeling for design",
+        "tagline": "Push, pull and think in three dimensions.",
+        "short": "Fast push/pull modeling with groups, components, guides and inference snapping, for massing and early design."
+    },
+    "others": {
+        "cadcraft": "CadCraft",
+        "bimcraft": "BimCraft",
+        "markupcraft": "MarkupCraft",
+        "takeoffcraft": "TakeoffCraft",
+        "civilcraft": "CivilCraft",
+        "detailcraft": "DetailCraft",
+        "partcraft": "PartCraft"
+    },
+    "vendor": {
+        "manifold-3d": "3.5.4",
+        "three": "0.186.1"
+    },
+    "origin": "https://getcadcraft.com",
+    "packed": {
+        "at": "2026-10-13T20:37:19Z",
+        "build": "0.4"
+    }
+}
