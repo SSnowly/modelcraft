@@ -292,7 +292,9 @@ export class View3D {
     addDef(this.model.root, this.root, [], 0);
     this.bb = box;
     if (cut && solids.length) this.addCaps(solids, cut);
-    for (const id of [...this.cache.keys()]) if (!live.has(id)) this.dropCache(id);
+    // geometry not drawn now is kept while its definition is still in the model (hidden, or another colour of it): showing
+    // it again is then immediate. What was deleted or replaced goes.
+    for (const [id, g] of [...this.cache]) if (!live.has(id) && this.model.def(g.def.id) !== g.def) this.dropCache(id);
     this.root.updateMatrixWorld(true);
     this.buildExtras(u);
     this.updateLights();

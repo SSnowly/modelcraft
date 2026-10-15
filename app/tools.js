@@ -199,7 +199,7 @@ export class Tools {
     if (!(v.v > 0)) { this.host.print(t('m3d.tool.type_a_length_above_zero')); return true; }
     const s = sel[0], kind = s.t === 'd' ? m.dims.get(s.id)?.kind : null;
     if (kind === 'ang') { this.host.print(t('m3d.model.dim_angle_only')); return true; }
-    try { m.change(s.t === 'd' ? t('m3d.tool.dimension_length') : t('m3d.tool.edge_length'), (mm) => (s.t === 'd' ? mm.setDimLength(s.id, v.v) : mm.setEdgeLength(this.host.path, s.id, v.v))); }
+    try { m.change(s.t === 'd' ? t('m3d.tool.dimension_length') : t('m3d.tool.edge_length'), (mm) => (s.t === 'd' ? mm.setDimLength(s.id, v.v) : mm.setEdgeLength(this.host.path, s.id, v.v)), s.t === 'd' ? m.dimScope(s.id) : [m.context(this.host.path).def.id]); }
     catch (err) { this.host.print(err.message); return true; }
     this.host.print(t(s.t !== 'd' ? 'm3d.tool.edge_set' : kind === 'rad' ? 'm3d.tool.rad_set' : kind === 'dia' ? 'm3d.tool.dia_set' : 'm3d.tool.dim_set', { len: formatLength(v.v, this.host.units) }));
     this.host.setSel(sel.filter((x) => (x.t === 'd' ? m.dims.has(x.id) : this.ctx().def.edges.has(x.id))));
@@ -1977,7 +1977,7 @@ class DimTool extends ClickTool {
       if (!(v.v > 0)) { this.h.print(t('m3d.tool.type_a_length_above_zero')); return false; }
       const id = this.last, kind = this.h.model.dims.get(id).kind;
       if (kind === 'ang') { this.h.print(t('m3d.model.dim_angle_only')); return true; }
-      try { this.h.model.change(t('m3d.tool.dimension_length'), (m) => m.setDimLength(id, v.v)); }
+      try { this.h.model.change(t('m3d.tool.dimension_length'), (m) => m.setDimLength(id, v.v), this.h.model.dimScope(id)); }
       catch (err) { this.h.print(err.message); return true; }
       this.h.print(t(kind === 'rad' ? 'm3d.tool.rad_set' : kind === 'dia' ? 'm3d.tool.dia_set' : 'm3d.tool.dim_set', { len: this.fmt(v.v) }));
       this.h.changed();
@@ -2297,7 +2297,7 @@ class PasteTool extends ClickTool {
     const r = this.cur || this.T.snap(ev);
     const m = this.placement(r.p), clip = this.clip, P = this.h.path;
     let made;
-    try { made = this.h.model.change(t('m3d.undo.paste'), (mm) => mm.pasteClip(P, clip, m)); } catch (err) { this.h.print(t('m3d.tool.paste_failed', { error: err.message })); this.T.set('select'); return; }
+    try { made = this.h.model.change(t('m3d.undo.paste'), (mm) => mm.pasteClip(P, clip, m), [this.h.model.context(P).def.id]); } catch (err) { this.h.print(t('m3d.tool.paste_failed', { error: err.message })); this.T.set('select'); return; }
     this.h.setSel(made || []);
     this.h.changed();
     this.h.print('Pasted.');

@@ -335,7 +335,7 @@ function init(root) {
       for (const x of [bb.min[0], bb.max[0]]) for (const y of [bb.min[1], bb.max[1]]) for (const z of [bb.min[2], bb.max[2]]) far = Math.max(far, (x - c[0]) * a[0] + (y - c[1]) * a[1] + (z - c[2]) * a[2]);
       at = [c[0] + a[0] * far, c[1] + a[1] * far, c[2] + a[2] * far];
     }
-    const out = model.change(copy ? t('app.undo.flipcopy') : t('app.undo.flip'), (m) => flipSel(m.context(host.path).def, sel, local(at), n, copy));
+    const out = model.change(copy ? t('app.undo.flipcopy') : t('app.undo.flip'), (m) => flipSel(m.context(host.path).def, sel, local(at), n, copy), [model.context(host.path).def.id]);
     host.setSel(out);
     print(t(copy ? 'app.flip.copy.' + axis : 'app.flip.done.' + axis));
   }
@@ -995,7 +995,7 @@ function init(root) {
     const sel = host.sel.filter((s) => s.t === 'f' || s.t === 'i');
     if (!sel.length || (others === 'selection' && sel.length < 2 && !sel.some((s) => s.t === 'i'))) { print(t(others === 'model' ? 'app.intersect.none' : 'app.intersect.none_sel')); return; }
     tools.escape();
-    const n = model.change(t(others === 'model' ? 'ui.editmenu.intersect_model' : 'ui.editmenu.intersect_sel'), (m) => intersectFaces(m, host.path, sel, others));
+    const n = model.change(t(others === 'model' ? 'ui.editmenu.intersect_model' : 'ui.editmenu.intersect_sel'), (m) => intersectFaces(m, host.path, sel, others), [model.context(host.path).def.id]);
     if (!n) { print(t('app.intersect.nothing')); return; }   // nothing changed, so no undo step was made
     print(t('app.intersect.done', { n }));
     afterHistory();
@@ -1053,13 +1053,13 @@ function init(root) {
     const sel = host.sel.filter((x) => x.t === 'e' || x.t === 'f' || x.t === 'i');
     if (!sel.length) { print(t('app.isolate.none')); return; }
     tools.escape();
-    const n = model.change(t('app.undo.isolate'), (m) => isolateSel(m.context(host.path).def, sel));
+    const n = model.change(t('app.undo.isolate'), (m) => isolateSel(m.context(host.path).def, sel), [model.context(host.path).def.id]);
     print(t(host.path.length ? 'app.isolate.done.group' : 'app.isolate.done', { n }));
     scheduleInfo(); view.invalidate();
   }
   function unhideEverything() {
     if (!hiddenCount(model)) { print(t('app.unhide.none')); return; }
-    const n = model.change(t('ui.editmenu.unhide_all'), (m) => unhideAll(m));
+    const n = model.change(t('ui.editmenu.unhide_all'), (m) => unhideAll(m), model.holding(null));
     print(t('app.unhide.done', { n }));
     scheduleInfo(); view.invalidate();
   }
@@ -1073,7 +1073,7 @@ function init(root) {
       for (const s of sel) if (s.t === 'd') m.dims.delete(s.id);
       for (const s of sel) if (s.t === 's') m.deleteSection(s.id);
       m.purge();
-    });
+    }, [model.context(host.path).def.id]);
     host.setSel([]);
     view.invalidate();
   }
@@ -1096,7 +1096,7 @@ function init(root) {
       const all = [];
       for (const s of insts) all.push(...m.explode(def, s.id));
       return all;
-    });
+    }, [model.context(host.path).def.id]);
     host.setSel(out || []);
   }
   // ---- clipboard ----
@@ -1125,7 +1125,7 @@ function init(root) {
     hideHint();
     if (inPlace) {
       let made;
-      try { made = model.change(t('ui.editmenu.paste_in_place'), (m) => m.pasteClip(host.path, c, c.m)); } catch (err) { print(t('app.paste.failed', { error: err.message })); return; }
+      try { made = model.change(t('ui.editmenu.paste_in_place'), (m) => m.pasteClip(host.path, c, c.m), [model.context(host.path).def.id]); } catch (err) { print(t('app.paste.failed', { error: err.message })); return; }
       setTool('select');
       host.setSel(made || []);
       print(t('app.paste.inplace'));
@@ -1405,7 +1405,7 @@ function init(root) {
     dragFrom = null;
     if (!f) return;
     let nid2;
-    try { nid2 = model.change(t('app.undo.tree_move'), (m) => m.moveInto(f.parent, f.iid, to)); }
+    try { nid2 = model.change(t('app.undo.tree_move'), (m) => m.moveInto(f.parent, f.iid, to), [model.context(f.parent).def.id, model.context(to).def.id]); }
     catch (err) { print(err.message); return; }
     if (nid2 === f.iid && f.parent.join() === to.join()) return;
     host.path = to.slice(); host.setSel([{ t: 'i', id: nid2 }]);
@@ -1520,7 +1520,7 @@ function init(root) {
       inp.addEventListener('change', () => {
         const v = inp.value.trim();
         if (!v || v === name) { inp.value = name; return; }
-        try { model.change(t('app.undo.tag_rename'), (m) => m.renameTag(name, v)); print(t('app.tag.renamed', { old: name, name: model.tag(v).name })); }
+        try { model.change(t('app.undo.tag_rename'), (m) => m.renameTag(name, v), model.holding(model.tag(name)?.name ?? name)); print(t('app.tag.renamed', { old: name, name: model.tag(v).name })); }
         catch (err) { print(err.message); inp.value = name; }
         tagsDrawn = ''; afterHistory();
       });
@@ -1557,7 +1557,7 @@ function init(root) {
     print(t('app.tag.added', { name: nm }));
   }
   function deleteTagNamed(name) {
-    const n = model.change(t('app.undo.tag_delete'), (m) => m.deleteTag(name));
+    const n = model.change(t('app.undo.tag_delete'), (m) => m.deleteTag(name), model.holding(model.tag(name)?.name ?? name));
     print(t('app.tag.deleted', { name, n }));
     tagsDrawn = ''; afterHistory();
   }
@@ -1694,7 +1694,7 @@ function init(root) {
     } else if (sel.length === 1 && nE === 1) {
       const e = def.edges.get(sel[0].id);
       ui.infoH.textContent = t('app.info.edge');
-      if (e) lenBox(t('app.info.length'), 'mc-edgelen', dist(def.verts.get(e.a), def.verts.get(e.b)), (L) => model.change(t('app.undo.edge_length'), (m) => m.setEdgeLength(host.path, sel[0].id, L)));
+      if (e) lenBox(t('app.info.length'), 'mc-edgelen', dist(def.verts.get(e.a), def.verts.get(e.b)), (L) => model.change(t('app.undo.edge_length'), (m) => m.setEdgeLength(host.path, sel[0].id, L), [model.context(host.path).def.id]));
       if (e) notes.push(el('p', { className: 'mc-note' }, t('app.info.edge.note')));
     } else if (sel.length === 1 && nI === 1) {
       const inst = def.insts.get(sel[0].id), d = inst && model.def(inst.def);
@@ -1718,7 +1718,7 @@ function init(root) {
         }
         const bb = model.bbox(d);
         if (bb) [t('app.info.width'), t('app.info.depth'), t('app.info.height')].forEach((lb, q) => {
-          if (bb.max[q] - bb.min[q] > 1e-6) lenBox(lb, 'mc-size' + q, bb.max[q] - bb.min[q], (L) => model.change(t(d.kind === 'component' ? 'app.undo.resize_component' : 'app.undo.resize_group'), (m) => m.setDefSize(d.id, q, L)));
+          if (bb.max[q] - bb.min[q] > 1e-6) lenBox(lb, 'mc-size' + q, bb.max[q] - bb.min[q], (L) => model.change(t(d.kind === 'component' ? 'app.undo.resize_component' : 'app.undo.resize_group'), (m) => m.setDefSize(d.id, q, L), [d.id]));
           else row(lb, formatLength(0, u));
         });
         if (!(s.closed && !d.insts.size)) solidCheck(d, sel[0].id, notes);
@@ -1729,7 +1729,7 @@ function init(root) {
         btn(t('app.info.edit'), () => host.openContext([...host.path, sel[0].id]));
         btn(t('app.info.explode'), explodeSel);
         if (d.kind === 'component' && (counts.get(d.id) || 0) > 1) btn(t('app.info.make_unique'), () => { model.change(t('app.info.make_unique'), (m) => m.makeUnique(m.context(host.path).def, sel[0].id), [model.context(host.path).def.id]); scheduleInfo(); });
-        if (d.kind === 'group') btn(t('app.undo.make_component'), () => { model.change(t('app.undo.make_component'), (m) => { const dd = m.def(d.id); dd.kind = 'component'; dd.name = m.uniqueName(t('app.info.component')); }); scheduleInfo(); });
+        if (d.kind === 'group') btn(t('app.undo.make_component'), () => { model.change(t('app.undo.make_component'), (m) => { const dd = m.def(d.id); dd.kind = 'component'; dd.name = m.uniqueName(t('app.info.component')); }, [d.id]); scheduleInfo(); });
       }
     } else if (sel.length === 1 && nD === 1) {
       const dm = model.dims.get(sel[0].id), id = sel[0].id;
@@ -1737,7 +1737,7 @@ function init(root) {
       if (dm && (dm.kind === 'rad' || dm.kind === 'dia')) {
         // 0.4 M5: a radius or diameter; retyping it gives the curve a new size about its centre
         const g = model.radialAt(dm.c), dia = dm.kind === 'dia';
-        if (g?.live && g.flat) lenBox(t(dia ? 'app.info.diameter' : 'app.info.radius'), 'mc-dimlen', dia ? 2 * g.r : g.r, (L) => model.change(t('app.undo.dim_length'), (m) => m.setDimLength(id, L)));
+        if (g?.live && g.flat) lenBox(t(dia ? 'app.info.diameter' : 'app.info.radius'), 'mc-dimlen', dia ? 2 * g.r : g.r, (L) => model.change(t('app.undo.dim_length'), (m) => m.setDimLength(id, L), model.dimScope(id)));
         else if (g) row(t(dia ? 'app.info.diameter' : 'app.info.radius'), formatLength(dia ? 2 * g.r : g.r, u));
         props.append(el('label', { for: 'mc-dimkind' }, t('app.info.dim.show')));
         const ks = el('select', { id: 'mc-dimkind', className: 'mc-select' }, el('option', { value: 'rad' }, t('app.info.radius')), el('option', { value: 'dia' }, t('app.info.diameter')));
@@ -1751,7 +1751,7 @@ function init(root) {
         notes.push(el('p', { className: 'mc-note' }, t('m3d.model.dim_angle_only')));
       } else if (dm) {
         const [pa, pb] = model.dimEnds(dm), attached = !!(dm.a.path && dm.b.path);
-        lenBox(t('app.info.length'), 'mc-dimlen', dist(pa, pb), (L) => model.change(t('app.undo.dim_length'), (m) => m.setDimLength(id, L)));
+        lenBox(t('app.info.length'), 'mc-dimlen', dist(pa, pb), (L) => model.change(t('app.undo.dim_length'), (m) => m.setDimLength(id, L), model.dimScope(id)));
         props.append(el('label', { for: 'mc-dimmove' }, t('app.info.dim.moves')));
         const mv = el('select', { id: 'mc-dimmove', className: 'mc-select' },
           el('option', { value: 'b' }, t('app.info.dim.b')), el('option', { value: 'a' }, t('app.info.dim.a')), el('option', { value: 'both' }, t('app.info.dim.both')));
@@ -2188,11 +2188,11 @@ function init(root) {
       const id = 'mc-rule-' + ax;
       const sel = el('select', { id, className: 'mc-select' }, ...RULES.map((r) => el('option', { value: r }, r === 'auto' ? t('app.dyn.rule.auto', { rule: t('app.dyn.rule.' + D.ruleOf({ inst: { rule: {} }, box: part.box }, k, B)) }) : t('app.dyn.rule.' + r))));
       sel.value = inst.rule?.[ax] || 'auto';
-      sel.addEventListener('change', () => { model.change(t('app.undo.rule'), (m) => { const i = m.def(comp.id).insts.get(iid); i.rule = { ...(i.rule || {}), [ax]: sel.value }; if (sel.value === 'auto') delete i.rule[ax]; if (!Object.keys(i.rule).length) delete i.rule; }); scheduleInfo(); });
+      sel.addEventListener('change', () => { model.change(t('app.undo.rule'), (m) => { const i = m.def(comp.id).insts.get(iid); i.rule = { ...(i.rule || {}), [ax]: sel.value }; if (sel.value === 'auto') delete i.rule[ax]; if (!Object.keys(i.rule).length) delete i.rule; }, [comp.id]); scheduleInfo(); });
       box.append(el('label', { for: id }, t('app.dyn.axis.' + ax)), sel);
       if (inst.rule?.[ax] === 'repeat') {
         const sp = el('input', { type: 'text', className: 'mc-input', value: formatLength(inst.rule['s' + ax] || (part.box.max[k] - part.box.min[k]) * 2, model.units), 'aria-label': t('app.dyn.spacing') });
-        sp.addEventListener('change', () => { const v = parseLength(sp.value, model.units); if (!(v > 0)) { print(t('app.len.bad')); return; } model.change(t('app.undo.rule'), (m) => { m.def(comp.id).insts.get(iid).rule['s' + ax] = v; }); });
+        sp.addEventListener('change', () => { const v = parseLength(sp.value, model.units); if (!(v > 0)) { print(t('app.len.bad')); return; } model.change(t('app.undo.rule'), (m) => { m.def(comp.id).insts.get(iid).rule['s' + ax] = v; }, [comp.id]); });
         box.append(el('label', {}, t('app.dyn.spacing')), sp);
       }
     });
@@ -2228,7 +2228,7 @@ function init(root) {
         const nd = D.stretchDef(m, m.def(src.id), size, m.uniqueName(src.name.replace(/#\d+$/, '')));
         i.def = nd.id;
         m.purge();
-      });
+      }, [model.context(host.path).def.id]);
       print(t('app.dyn.done', { name: src.name, size: size.map((v) => formatLength(v, u)).join(' × ') }));
       afterHistory();
     });
@@ -2259,7 +2259,7 @@ function init(root) {
     const name = t('app.starter.' + id);
     // one definition per starter thing: picking it again places another copy of the same component
     let def = [...model.defs.values()].find((d) => d.kind === 'component' && d.starter === id);
-    if (!def) def = model.change(t('app.undo.starter'), (m) => { const d = buildStarter(m, id, name); d.starter = id; return d; });
+    if (!def) def = model.change(t('app.undo.starter'), (m) => { const d = buildStarter(m, id, name); d.starter = id; return d; }, []);
     afterHistory();
     const hint = () => t(it.wall ? 'app.starter.where_wall' : 'app.starter.where', { name });
     setTool('place', { defId: def.id, align: true, hint });
@@ -2276,7 +2276,7 @@ function init(root) {
     model.change(t('app.undo.terrain'), (m) => {
       const d = L.terrainFromContours(m, m.context(host.path).def, eids, { name: t('app.terrain.name') });
       if (d) iid = m.place(m.context(host.path).def, d.id, ident());
-    });
+    }, [model.context(host.path).def.id]);
     if (iid === null) { print(t('app.terrain.flat')); return; }
     host.setSel([{ t: 'i', id: iid }]);
     const d = model.def(ctxDef().insts.get(iid).def);
@@ -2307,7 +2307,7 @@ function init(root) {
       dlg.remove(); focusView();
       if (!go) return;
       const L = await terrainLib();
-      const defId = model.change(t('app.undo.terrain'), (m) => L.terrainGrid(m, { ...go, name: t('app.terrain.name') }).id);
+      const defId = model.change(t('app.undo.terrain'), (m) => L.terrainGrid(m, { ...go, name: t('app.terrain.name') }).id, []);
       afterHistory();
       setTool('place', { defId, hint: () => t('app.terrain.grid.where') });
       print(t('app.terrain.grid.where'));
@@ -2405,7 +2405,7 @@ function init(root) {
     try { print(t('app.text3d.loading')); [T3, M] = await Promise.all([import('./text3d.js'), solidsLib().then((L) => L.manifold())]); }
     catch { print(t('app.solid.noload')); return; }
     let defId;
-    try { defId = model.change(t('app.undo.text3d'), (m) => T3.textDef(M, m, o.text, { height: o.height, depth: o.depth }).id); }
+    try { defId = model.change(t('app.undo.text3d'), (m) => T3.textDef(M, m, o.text, { height: o.height, depth: o.depth }).id, []); }
     catch (err) { print(err.message); return; }
     afterHistory();
     setTool('place', { defId, align: true, hint: () => t('app.text3d.where') });
