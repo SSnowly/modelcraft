@@ -6,7 +6,7 @@
  *
  * Mouse: the active tool gets the left button; middle-drag orbits, Shift + middle-drag or
  * right-drag pans, the wheel zooms at the cursor. Touch: one finger uses the tool, two fingers
- * pinch-zoom and pan. Keys: tool letters (L R C N P M Q S E T D O H Z, Space), numbers and units go
+ * pan and pinch-zoom, three orbit (settings.touch2 swaps them), hold still then drag = orbit. Keys: tool letters (L R C N P M Q S E T D O H Z, Space), numbers and units go
  * to the value box (Enter applies), arrows lock red/green/blue while drawing (orbit otherwise,
  * Shift pans), Esc, Delete, G make component / Shift+G make group, Ctrl+Z/Y/S/O/A, Page Up/Down for scenes, Shift+Z extents.
  * Edit group (Undo, Redo, Copy, Paste, More ▾ with cut, paste in place, duplicate, delete, select all/none, key style) and a
@@ -23,11 +23,12 @@
  *   scroll   'auto' | 'mouse' | 'trackpad': a trackpad's two-finger swipe orbits (Shift pans); a pinch (ctrlKey
  *            wheel) always zooms. 'auto' treats sideways or fractional scrolling as a trackpad.
  *   snap     tools.snapping (also the status bar's Snap button; Shift+Tab in Blender style)
+ *   touch2   'pan' (default: two fingers pan + pinch, three orbit) | 'orbit' (two fingers orbit + pinch, three pan)
  *   collide  tools.collide (also the Collide button): Move and Push/pull stop where solids touch (collide.js)
  *   corner   'cube' (default; the view cube top right, viewcube.js + viewcube-camera.js) | 'axes' (X/Y/Z triad bottom left) | 'none'
  * `window.modelcraft` = {model, cam, tools, view, host, ui, settings, clip()} for tests and the console.
  */
-import { Model, connected, eraseSel, reverseFaces, solidInfo, faceArea, cleanScene, curveInfo, setCurveRadius, PALETTE, paintFaces, paintInstance, isColor, flipSel, hideSel, isolateSel, unhideAll, hiddenCount, softenEdges, intersectFaces, solidProblems, fixSolid, faceNormal, cleanStoreys } from './model.js';
+import { Model, connected, eraseSel, reverseFaces, solidInfo, faceArea, cleanScene, curveInfo, setCurveRadius, PALETTE, paintFaces, paintInstance, isColor, isMaterialPaint, setMaterialColors, setImageColors, isImagePaint, flipSel, hideSel, isolateSel, unhideAll, hiddenCount, softenEdges, intersectFaces, solidProblems, fixSolid, faceNormal, cleanStoreys } from './model.js';
 import { Camera, VIEWS, lerpCam } from './camera.js';
 import { sceneOf, angleLayout, formatDeg } from './infer.js';
 import { Tools, TOOL_NAMES, TOOL_KEYS } from './tools.js';
@@ -35,8 +36,9 @@ import { View3D } from './view3d.js';
 import { pngName } from './viewimage.js';
 import { formatLength, formatArea, formatVolume, parseLength, localeUnits } from './units.js';
 import { exportGLB, exportOBJ, exportMTL, exportSTL, exportIFC, exportDAE, exportDXF, toDwgModel, importOBJ, importGLTF, importDXF, importDWG, importDAE } from './io.js';
+import { dynamicSummary } from './dwg-dynamic.js';   // 0.5 DB.11 (a byte-identical copy of BimCraft's)
 import { sunPosition } from './sun.js';
-import { ident, dist, add, sub, mul, dot, cross } from './vec.js';
+import { ident, dist, add, sub, mul, dot, cross, norm } from './vec.js';
 import { el } from './ui-util.js';
 import { mountViewCube, mountAxisIcon } from './viewcube.js';
 import * as i18n from "./i18n.js";
@@ -45,6 +47,9 @@ import { getHost } from "./host.js";
 import { installAgents } from './agents.js';
 import { Autosave } from "./app-autosave.js";
 import { handoffParam, takeHandoff } from './handoff.js';
+import { MATERIALS, CATEGORIES, material as libMat, planarUV } from './render/materials.js';   // 0.5 RC.7: the material library
+import { libMaterial, swatchPixels, imageTexture, imageMaterial as imgMaterial } from './render/three-mats.js';
+import { action3d, wheelFactor } from './input-mouse.js';   // 0.5 IP.3: the menu style's buttons and wheel (input-modelcraft.js)
 const { t } = i18n;
 /** The display unit in words, lower case ("feet and inches", "millimeters"). */
 const unitWords = (u) => t('app.unit.' + String(u).replace('-', '_'));
@@ -76,6 +81,7 @@ function init(root) {
   const model = new Model();
   const cam = new Camera();
   let fileName = t('app.file.untitled');
+  let renderSettings = null;   // 0.5 RC.11: the Render dialog's settings (render/looks.js cleanSettings shape), kept in the file's view
   let presentation = false;   // 0.4 M28: only the model on screen (no axes, guides, marks or selection)
   let sceneIndex = -1;
   let playing = null;
@@ -125,18 +131,20 @@ function init(root) {
   const viewCube = mountViewCube(ui.stage, { ...cubeOpts, i18n: { t: i18n.t, has: i18n.has } });
   const axisIcon = mountAxisIcon(ui.stage, { getView: cubeOpts.getView, i18n: { t: i18n.t, has: i18n.has } });
   { const draw0 = view.draw.bind(view); view.draw = () => { draw0(); viewCube.update(); axisIcon.update(); }; }
-  window.modelcraft = { model, cam, tools, view, host, ui, viewCube, axisIcon, cubeView: cubeOpts.getView, presenting: () => presentation };
+  window.modelcraft = { model, cam, tools, view, host, ui, viewCube, axisIcon, cubeView: cubeOpts.getView, presenting: () => presentation,
+    afterHistory: () => afterHistory(), print: (m) => print(m) };   // Studio Live (0.5 LV.22, live.js): redraw after others' edits, its messages
   // ---- AI assistants and scripts (0.4 part 2 X.7, session agents; agents.js on host.js's control channel): off until Settings › Assistants ----
   installAgents({ model, changed: () => host.changed(), canvas: () => view.renderer?.domElement || null, draw: () => view.draw() });
 
   // ---- settings (Settings › ModelCraft; per viewer conveniences only) ----
-  const SET_DEFAULTS = { keys: 'sketchup', scroll: 'auto', snap: true, collide: true, corner: 'cube' };
+  const SET_DEFAULTS = { keys: 'sketchup', scroll: 'auto', touch2: 'pan', snap: true, collide: true, corner: 'cube' };
   const settings = (() => {
     const out = { ...SET_DEFAULTS };
     try {
       const v = JSON.parse(localStorage.getItem('modelcraft.settings') || '{}');
       if (v.keys === 'blender' || v.keys === 'sketchup') out.keys = v.keys;
       if (['auto', 'mouse', 'trackpad'].includes(v.scroll)) out.scroll = v.scroll;
+      if (['pan', 'orbit'].includes(v.touch2)) out.touch2 = v.touch2;
       if (typeof v.snap === 'boolean') out.snap = v.snap;
       if (typeof v.collide === 'boolean') out.collide = v.collide;
       if (['cube', 'axes', 'none'].includes(v.corner)) out.corner = v.corner;
@@ -159,6 +167,7 @@ function init(root) {
     if (settingsDlg) {
       settingsDlg.querySelectorAll('input[name="mcKeys"]').forEach((r) => { r.checked = r.value === settings.keys; });
       settingsDlg.querySelectorAll('input[name="mcScroll"]').forEach((r) => { r.checked = r.value === settings.scroll; });
+      settingsDlg.querySelectorAll('input[name="mcTouch2"]').forEach((r) => { r.checked = r.value === settings.touch2; });
       const sn = settingsDlg.querySelector('input[name="mcSnap"]'), co = settingsDlg.querySelector('input[name="mcCollide"]');
       if (sn) sn.checked = settings.snap;
       if (co) co.checked = settings.collide;
@@ -181,16 +190,46 @@ function init(root) {
       const t = e.target;
       if (t.name === 'mcKeys') setKeys(t.value);
       else if (t.name === 'mcScroll') setSetting('scroll', t.value);
+      else if (t.name === 'mcTouch2') setSetting('touch2', t.value);
       else if (t.name === 'mcSnap') setSetting('snap', t.checked);
       else if (t.name === 'mcCollide') setSetting('collide', t.checked);
       else if (t.name === 'mcCorner') setSetting('corner', t.value);
     });
-    settingsDlg.addEventListener('cc-settings-reset', () => { Object.assign(settings, SET_DEFAULTS); persist(); applySettings(); });
+    settingsDlg.addEventListener('cc-settings-reset', () => { Object.assign(settings, SET_DEFAULTS); persist(); applySettings();
+      // the push-pull keys again: a Modeler style goes back to ModelCraft's own (IP.3: the style and the keys stay one)
+      const p = window.ccInput?.current();
+      if (p && (p.builtin ? p.id : p.base) === 'modeler') window.ccInput.setStyle('modelcraft');
+    });
   }
   root.querySelectorAll('[data-mc-toggle]').forEach((b) => b.addEventListener('click', () => toggle(b.dataset.mcToggle)));
   function setKeys(v) {
     setSetting('keys', v, v === 'blender' ? t('app.keys.set.blender') : t('app.keys.set.sketchup'));
+    // 0.5 IP.3: the menu style is the one source of truth — picking a key set here picks the matching style
+    const ci = window.ccInput, p = ci?.current();
+    if (!p) return;
+    const base = p.builtin ? p.id : p.base;
+    if (v === 'blender' && base !== 'modeler') ci.setStyle('modeler');
+    else if (v === 'sketchup' && base === 'modeler') ci.setStyle('modelcraft');
   }
+  /**
+   * 0.5 IP.3 (input-modelcraft.js): the style in use decides how ModelCraft reads keys — Modeler (and styles built on it)
+   * the modeler way ('blender'), every other style the push-pull way. The first time menu styles run, someone who had chosen
+   * the modeler keys gets the Modeler style (once; localStorage modelcraft.keys.carried).
+   */
+  window.modelcraft.syncKeyStyle = () => {
+    const ci = window.ccInput, p = ci?.current();
+    if (!p) return;
+    let carried = true;
+    try { carried = !!localStorage.getItem('modelcraft.keys.carried'); if (!carried) localStorage.setItem('modelcraft.keys.carried', '1'); } catch { /* private window */ }
+    if (!carried && settings.keys === 'blender' && p.id === 'modelcraft') { ci.setStyle('modeler'); return; }
+    const base = p.builtin ? p.id : p.base;
+    const want = base === 'modeler' ? 'blender' : 'sketchup';
+    if (settings.keys !== want) setSetting('keys', want);
+  };
+  window.addEventListener('cc-input-ready', () => window.modelcraft.syncKeyStyle());
+  queueMicrotask(() => window.modelcraft.syncKeyStyle());
+  // the menu styles' messages go to the status line; while a tool is busy its letters stay its own (X/Y/Z lock an axis …)
+  window.ccInputHooks = { status: (text) => print(text || ''), busy: () => !!tools.tool.busy };
   root.querySelector('[data-mc-keys]')?.addEventListener('change', (e) => { setKeys(e.target.value); ui.over.focus({ preventScroll: true }); });
   function toggle(k) {
     setSetting(k, !settings[k], k === 'snap'
@@ -244,6 +283,18 @@ function init(root) {
 
   // ---- messages ----
   function print(m) { ui.msg.textContent = m || ''; }
+  /**
+   * 0.5 DB.11 (dwg-dynamic.js, BimCraft's, copied): a DWG's dynamic blocks come in as their file shows them (the other
+   * visibility states' objects are invisible there and left out); the import status names each, the states shown and the
+   * others it has.
+   */
+  function dynamicNote(dwg) {
+    if (!dwg) return '';
+    const list = dynamicSummary(dwg).filter((d) => d.states.length);
+    if (!list.length) return '';
+    const one = (d) => t('app.import.dyn.one', { name: d.name, shown: d.shown.filter(([k]) => k).map(([k, n]) => k + ' ×' + n).join(', ') || '—', states: d.states.join(', ') });
+    return ' ' + t('app.import.dyn', { list: list.slice(0, 6).map(one).join('; ') + (list.length > 6 ? '; …' : '') });
+  }
 
   // ---- tools: buttons and pressed state ----
   const setTool = (name, arg) => {
@@ -280,8 +331,8 @@ function init(root) {
   // ---- Colors (0.4 M8): the Paint tool's colour; with a selection, a click on a swatch paints it ----
   const palette = root.querySelector('[data-palette]');
   const swatches = [];
-  const markPaint = (c) => { for (const sw of swatches) sw.el.setAttribute('aria-checked', String((sw.c || null) === (c || null) || (sw.custom && c && !PALETTE.some(([, h]) => h === c)))); };
-  host.paintChanged = (c) => { markPaint(c); if (c && !PALETTE.some(([, h]) => h === c)) { customIn.value = c; customSw.style.background = c; } };
+  const markPaint = (c) => { for (const sw of swatches) sw.el.setAttribute('aria-checked', String((sw.c || null) === (c || null) || (sw.custom && isColor(c) && !PALETTE.some(([, h]) => h === c)))); };
+  host.paintChanged = (c) => { markPaint(c); if (isColor(c) && !PALETTE.some(([, h]) => h === c)) { customIn.value = c; customSw.style.background = c; } };
   const choosePaint = (c, name) => {
     tools.paintColor = c;
     markPaint(c);
@@ -301,14 +352,144 @@ function init(root) {
     return b;
   };
   const colorName = (name) => t('app.color.' + name.toLowerCase().replace(/\s+/g, '_'));
-  colorLabel = (c) => { const p = c && PALETTE.find(([, h]) => h === c); return !c ? t('app.color.default') : p ? colorName(p[0]) : c; };
+  colorLabel = (c) => { if (isMaterialPaint(c)) return libMat(c.slice(4)) ? t('render.mat.' + c.slice(4)) : c.slice(4); if (isImagePaint(c)) { const im = model.images.get(c.slice(4, c.indexOf('|'))); return t('app.color.image', { name: im?.name || '?' }); } const p = c && PALETTE.find(([, h]) => h === c); return !c ? t('app.color.default') : p ? colorName(p[0]) : c; };
   palette.append(swatch(null, t('app.color.default'), 'is-default'), ...PALETTE.map(([name, c]) => swatch(c, colorName(name))));
   const customIn = el('input', { type: 'color', value: '#5a8f6a', 'aria-label': t('app.color.other'), dataset: { paintCustom: '' } });
   const customSw = el('span', { className: 'mc-swatch is-custom', role: 'radio', 'aria-checked': 'false', title: t('app.color.other') }, el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' }), customIn);
   swatches.push({ el: customSw, c: undefined, custom: true });
   customIn.addEventListener('change', () => { const c = customIn.value.toLowerCase(); if (!isColor(c)) return; customSw.style.background = c; choosePaint(c, c); });
   palette.append(customSw);
+  // ---- Materials (0.5 RC.7, session render): library materials paint like colours ('mat:<id>' in the same field). The
+  // views draw their textures (view.textures); exports, CadCraft's 3D tab and 3D printing get the material's colour. ----
+  setMaterialColors((id) => libMat(id)?.color || null);
+  host.paintName = (c) => colorLabel(c);   // the Paint tool's messages name a material, not its 'mat:' id
+  const texMats = new Map();
+  // imported images (0.5 RC.11 (b)): one texture per image, drawn once the browser has decoded it
+  const imageMaterial = (id) => imgMaterial(imageTexture(model.images.get(id), () => view.invalidate()), { lambert: true, front: true, clipping: view.clip });
+  setImageColors((id) => model.images.get(id)?.avg || null);
+  view.textures = {
+    material: (key) => {
+      if (texMats.has(key)) return texMats.get(key);
+      let m = null;
+      if (key.startsWith('mat:') && libMat(key.slice(4))) m = libMaterial(key.slice(4), { lambert: true, front: true, clipping: view.clip });
+      else if (key.startsWith('img:') && model.images.has(key.slice(4))) m = imageMaterial(key.slice(4));
+      texMats.set(key, m);
+      return m;
+    },
+    uv: planarUV,
+  };
+  const matlib = root.querySelector('[data-matlib]');
+  const pending = [];
+  for (const cat of CATEGORIES) {
+    const list = MATERIALS.filter((m) => m.cat === cat);
+    if (!list.length) continue;
+    matlib.append(el('p', { className: 'mc-matcat' }, t('render.matcat.' + cat)),
+      el('div', { className: 'mc-palette mc-matrow' }, list.map((m) => { const b = swatch('mat:' + m.id, t('render.mat.' + m.id), 'is-mat'); b.style.background = m.color; pending.push([b, m.id]); return b; })));
+  }
+  // the textures' swatches are drawn when the page is idle, a few at a time (each is a small texture drawn by code)
+  const drawSwatches = (deadline) => {
+    while (pending.length && (!deadline || deadline.timeRemaining() > 4)) {
+      const [b, id] = pending.shift(), px = swatchPixels(id, 40);
+      if (!px || !libMat(id).tex) continue;
+      const c = document.createElement('canvas'); c.width = px.w; c.height = px.h;
+      c.getContext('2d').putImageData(new ImageData(px.data, px.w, px.h), 0, 0);
+      b.style.backgroundImage = 'url(' + c.toDataURL() + ')';
+    }
+    if (pending.length) (window.requestIdleCallback || ((f) => setTimeout(f, 50)))(drawSwatches);
+  };
+  (window.requestIdleCallback || ((f) => setTimeout(f, 200)))(drawSwatches);
   markPaint(tools.paintColor);
+
+  // ---- Lights (0.5 RC.11 (d), session render): lamps for rendered pictures. The Light tool (tools.js) places one; the list
+  // and the editor change it (one undo step each); a click on a lamp's mark in the view selects it. World coordinates. ----
+  const lightsUl = root.querySelector('[data-lights]'), lightEdit = root.querySelector('[data-light-edit]'), lightsSec = root.querySelector('[data-lights-sec]');
+  let selLight = null, lightsSeen = '';
+  const lightName = (id, L) => L.name || t('app.light.name.' + L.kind, { n: [...model.lights].filter(([, x]) => x.kind === L.kind).findIndex(([k]) => k === id) + 1 });
+  root.querySelectorAll('[data-light-add]').forEach((b) => b.addEventListener('click', () => { setTool('light', { kind: b.dataset.lightAdd }); }));
+  host.lightPlaced = (id) => { selLight = id; renderLights(true); print(t('app.light.added', { name: lightName(id, model.lights.get(id)) })); };
+  const changeLight = (patch) => {
+    if (selLight === null || !model.lights.has(selLight)) return;
+    try { model.change(t('app.undo.light'), (m) => m.setLight(selLight, patch)); host.changed(); renderLights(true); } catch (e) { print(e.message); }
+  };
+  function renderLights(force = false) {
+    const key = model.version + '|' + selLight + '|' + model.units;
+    if (!force && key === lightsSeen) return;
+    lightsSeen = key;
+    if (selLight !== null && !model.lights.has(selLight)) selLight = null;
+    lightsUl.replaceChildren(...[...model.lights].map(([id, L]) => {
+      const on = el('input', { type: 'checkbox', checked: L.on, 'aria-label': t('app.light.on'), dataset: { lightOn: String(id) } });
+      on.addEventListener('change', () => { selLight = id; changeLight({ on: on.checked }); });
+      const name = el('button', { type: 'button', className: 'mc-linkbtn', 'aria-pressed': String(id === selLight), dataset: { lightPick: String(id) } }, lightName(id, L));
+      name.addEventListener('click', () => { selLight = id === selLight ? null : id; renderLights(true); view.invalidate(); });
+      return el('li', { className: id === selLight ? 'is-sel' : '' }, on, ' ', name);
+    }));
+    lightEdit.hidden = selLight === null;
+    if (selLight === null) { lightEdit.replaceChildren(); return; }
+    const L = model.lights.get(selLight), u = model.units;
+    const row = (label, input) => [el('label', { for: input.id }, label), input];
+    const len = (id, meters, apply) => {
+      const inp = el('input', { type: 'text', id, className: 'mc-input', value: formatLength(meters, u), spellcheck: false, autocomplete: 'off' });
+      inp.addEventListener('change', () => { const v = parseLength(inp.value, u); if (v === null || !Number.isFinite(v)) { print(t('app.len.bad')); inp.value = formatLength(meters, u); return; } apply(v); });
+      return inp;
+    };
+    const lum = el('input', { type: 'number', id: 'mc-light-lm', className: 'mc-input', min: '1', max: '200000', step: '50', value: String(L.lumens), dataset: { lightLumens: '' } });
+    lum.addEventListener('change', () => changeLight({ lumens: Number(lum.value) }));
+    const col = el('input', { type: 'color', id: 'mc-light-col', value: L.color, dataset: { lightColor: '' } });
+    col.addEventListener('change', () => changeLight({ color: col.value }));
+    const presets = el('span', { className: 'mc-light-presets' }, [['warm', '#ffd2a1'], ['neutral', '#fff1dc'], ['cool', '#eef3ff']].map(([k, c]) => {
+      const b = el('button', { type: 'button', className: 'btn-line btn-sm-cc', title: t('app.light.' + k) }, t('app.light.' + k));
+      b.addEventListener('click', () => changeLight({ color: c }));
+      return b;
+    }));
+    const rows = [...row(t('app.light.lumens'), lum), ...row(t('app.light.color'), col), el('span'), presets];
+    if (L.kind === 'spot') {
+      const ang = el('input', { type: 'number', id: 'mc-light-ang', className: 'mc-input', min: '5', max: '170', step: '5', value: String(L.angle), dataset: { lightAngle: '' } });
+      ang.addEventListener('change', () => changeLight({ angle: Number(ang.value) }));
+      rows.push(...row(t('app.light.angle'), ang));
+    }
+    if (L.kind === 'area') rows.push(...row(t('app.light.width'), len('mc-light-w', L.size[0], (v) => changeLight({ size: [v, L.size[1]] }))), ...row(t('app.light.depth'), len('mc-light-d', L.size[1], (v) => changeLight({ size: [L.size[0], v] }))));
+    else rows.push(...row(t('app.light.bulb'), len('mc-light-b', L.size[0], (v) => changeLight({ size: [v, v] }))));
+    rows.push(...row(t('app.light.x'), len('mc-light-x', L.p[0], (v) => changeLight({ p: [v, L.p[1], L.p[2]] }))),
+      ...row(t('app.light.y'), len('mc-light-y', L.p[1], (v) => changeLight({ p: [L.p[0], v, L.p[2]] }))),
+      ...row(t('app.light.height'), len('mc-light-z', L.p[2], (v) => changeLight({ p: [L.p[0], L.p[1], v] }))));
+    const del = el('button', { type: 'button', className: 'btn-line btn-sm-cc', dataset: { lightDelete: '' } }, t('app.light.delete'));
+    del.addEventListener('click', () => {
+      const id = selLight, nm = lightName(id, model.lights.get(id));
+      model.change(t('app.undo.light.delete'), (m) => m.deleteLight(id));
+      selLight = null; host.changed(); renderLights(true); print(t('app.light.deleted', { name: nm }));
+    });
+    lightEdit.replaceChildren(...rows, el('span'), del);
+  }
+  // the lamps' marks: a disc in the lamp's colour (a spot with its aim, a panel as its outline); dashed when off
+  view.drawExtra = (g, project, c) => {
+    for (const [id, L] of model.lights) {
+      const s = project(L.p);
+      if (!s) continue;
+      const sel = id === selLight;
+      g.setLineDash(L.on ? [] : [3, 3]); g.lineWidth = sel ? 2.5 : 1.5; g.strokeStyle = sel ? c.sel : c.ink; g.fillStyle = L.color;
+      if (L.kind === 'area') {
+        const ax = Math.abs(L.dir[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], e1 = norm(cross(L.dir, ax)), e2 = cross(L.dir, e1), w = L.size[0] / 2, h = L.size[1] / 2;
+        const q = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => project(add(L.p, add(mul(e1, a * w), mul(e2, b * h)))));
+        if (q.every(Boolean)) { g.beginPath(); q.forEach((v, i) => (i ? g.lineTo(v[0], v[1]) : g.moveTo(v[0], v[1]))); g.closePath(); g.globalAlpha = 0.45; g.fill(); g.globalAlpha = 1; g.stroke(); }
+      }
+      if (L.kind === 'spot') { const a = project(add(L.p, mul(L.dir, 0.6))); if (a) { g.beginPath(); g.moveTo(s[0], s[1]); g.lineTo(a[0], a[1]); g.stroke(); } }
+      g.beginPath(); g.arc(s[0], s[1], 6, 0, Math.PI * 2); g.fill(); g.stroke();
+      for (let k = 0; k < 8; k++) { const an = (k * Math.PI) / 4; g.beginPath(); g.moveTo(s[0] + Math.cos(an) * 8, s[1] + Math.sin(an) * 8); g.lineTo(s[0] + Math.cos(an) * 11, s[1] + Math.sin(an) * 11); g.stroke(); }
+    }
+    g.setLineDash([]);
+  };
+  // a click on a lamp's mark (Select) picks the lamp before the tools see it
+  ui.over.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || tools.name !== 'select' || !model.lights.size) return;
+    const r = ui.over.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, vp = cam.viewProj();
+    let best = null, bd = 11;
+    for (const [id, L] of model.lights) { const s2 = cam.project(L.p, vp); if (s2) { const d = Math.hypot(s2[0] - x, s2[1] - y); if (d < bd) { bd = d; best = id; } } }
+    if (best === null) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    selLight = best; renderLights(true); view.invalidate();
+    lightsSec.scrollIntoView({ block: 'nearest' });
+    print(t('app.light.picked', { name: lightName(best, model.lights.get(best)) }));
+  }, true);
 
   function hideHint() { ui.hint.hidden = true; }
 
@@ -318,26 +499,88 @@ function init(root) {
   let camDrag = null;
   const touches = new Map();
   let pinch = null;
-  // S.8 touch: one finger is the tool — a quick tap is a click, a drag is a press–drag, holding still for half a second
-  // finishes or stops what the tool is doing (as Enter); two fingers: drag = orbit, pinch = zoom; three fingers: pan.
+  // S.8 touch: one finger is the tool — a quick tap is a click, a drag is a press–drag; holding still for half a second
+  // finishes what the tool is doing (as Enter), or, with nothing going on, turns that finger into orbit until it lifts.
+  // Two fingers pan and pinch-zoom, three orbit (Settings › ModelCraft › Two fingers swaps them: settings.touch2).
+  // While a drawing finger is down, a loupe above it shows what is under it (the snaps a finger hides).
   let tap = null;            // the first finger, held back until it moves, lifts or is held
   const LONG_MS = 500, MOVE_PX = 8;
+  const loupe = (() => {
+    const c = document.createElement('canvas');
+    c.className = 'mc-loupe';
+    c.hidden = true;
+    c.setAttribute('aria-hidden', 'true');
+    ui.stage.append(c);
+    const R = 64, ZOOM = 2;   // screen px: the loupe's size is set here, its place follows the finger
+    c.style.width = c.style.height = R * 2 + 'px';
+    let at = null, raf = 0;
+    const paint = () => {
+      raf = 0;
+      if (!at) return;
+      const dpr = window.devicePixelRatio || 1, W = Math.round(R * 2 * dpr);
+      if (c.width !== W) { c.width = W; c.height = W; }
+      // above the finger, or below it near the top edge
+      const top = at.y - R * 2 - 36 >= 0 ? at.y - R * 2 - 36 : at.y + 36;
+      c.style.left = Math.max(0, Math.min(ui.stage.clientWidth - R * 2, at.x - R)) + 'px';
+      c.style.top = top + 'px';
+      const g = c.getContext('2d');
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, W, W);
+      g.save();
+      g.beginPath(); g.arc(W / 2, W / 2, W / 2, 0, Math.PI * 2); g.clip();
+      g.fillStyle = getComputedStyle(ui.stage).backgroundColor;
+      g.fillRect(0, 0, W, W);
+      // the same spot of the 3D canvas and of the overlay (snaps, guides), both in device pixels
+      const s = (R / ZOOM) * dpr, sx = at.x * dpr - s, sy = at.y * dpr - s;
+      for (const src of [ui.gl, ui.over]) { try { g.drawImage(src, sx, sy, s * 2, s * 2, 0, 0, W, W); } catch { /* not drawn yet */ } }
+      g.strokeStyle = getComputedStyle(root).getPropertyValue('--action') || '#06c';
+      g.lineWidth = dpr;
+      g.beginPath(); g.moveTo(W / 2 - 8 * dpr, W / 2); g.lineTo(W / 2 + 8 * dpr, W / 2); g.moveTo(W / 2, W / 2 - 8 * dpr); g.lineTo(W / 2, W / 2 + 8 * dpr); g.stroke();
+      g.restore();
+      c.hidden = false;
+    };
+    return {
+      // after the view's own frame (tools.move asked for it first), so the loupe copies what was just drawn
+      show(p) { if (tools.name === 'select' || tools.name === 'orbit' || tools.name === 'pan') { this.hide(); return; } at = p; if (!raf) raf = requestAnimationFrame(() => requestAnimationFrame(paint)); },
+      hide() { at = null; c.hidden = true; },
+    };
+  })();
   const markTouch = () => {
     if (tools.touch) return;
     tools.touch = true;
     root.classList.add('is-touch');
     const bar = root.querySelector('[data-touchbar]');
     if (bar) bar.hidden = false;
+    // the value field opens the number keyboard (Warren, 2026-10-15: lengths are numbers in the status bar's units);
+    // "abc" switches to letters for unit marks (5'6", 2m) — remembered on this device
+    const kbd = root.querySelector('[data-vcb-kbd]');
+    let letters = false;
+    try { letters = localStorage.getItem('mc-vcb-kbd') === 'letters'; } catch (e) { /* private mode */ }
+    const setKbd = () => { ui.vcb.inputMode = letters ? 'text' : 'decimal'; if (kbd) kbd.setAttribute('aria-pressed', String(letters)); };
+    setKbd();
+    if (kbd) {
+      kbd.hidden = false;
+      kbd.addEventListener('pointerdown', (e) => e.preventDefault());   // keep the field's focus (and its keyboard) open
+      kbd.addEventListener('click', () => {
+        letters = !letters; setKbd();
+        try { localStorage.setItem('mc-vcb-kbd', letters ? 'letters' : 'numbers'); } catch (e) { /* private mode */ }
+        if (document.activeElement === ui.vcb) { ui.vcb.blur(); ui.vcb.focus(); }   // the keyboard changes on the next focus
+      });
+    }
   };
   if (matchMedia?.('(pointer: coarse)').matches) markTouch();   // i18n-ignore: a media query
   const longPress = () => {
     if (!tap || tap.started) return;
     tap.done = true;
     hideHint();
-    if (tools.tool.busy) { if (!tools.tool.finish?.()) tools.escape(); print(t('app.touch.done')); }
-    else print(t('app.touch.hold'));
+    loupe.hide();
+    navigator.vibrate?.(15);
+    if (tools.tool.busy) { if (!tools.tool.finish?.()) tools.escape(); print(t('app.touch.done')); view.invalidate(); }
+    else { tap.orbit = { x: tap.x, y: tap.y }; print(t('app.touch.orbit')); }
   };
   ui.over.addEventListener('contextmenu', (e) => e.preventDefault());
+  let penBack = null;   // the tool to go back to when the pen's tip comes down after its eraser end
+  const penEraser = (e) => e.pointerType === 'pen' && (e.button === 5 || (e.buttons & 32) !== 0);
   ui.over.addEventListener('pointerdown', (e) => {
     ui.over.focus({ preventScroll: true });
     closeMenus();
@@ -348,6 +591,7 @@ function init(root) {
       if (touches.size >= 2) {
         // more fingers: forget the first finger's tap (and anything it began), then orbit / zoom / pan
         if (tap) { clearTimeout(tap.timer); if (tap.started) tools.escape(); tap = null; }
+        loupe.hide();
         const pts = [...touches.values()];
         const c = { x: pts.reduce((a, q) => a + q.x, 0) / pts.length, y: pts.reduce((a, q) => a + q.y, 0) / pts.length };
         if (pinch?.raf) cancelAnimationFrame(pinch.raf);
@@ -357,14 +601,35 @@ function init(root) {
       ui.over.setPointerCapture(e.pointerId);
       host.mouse = p;
       tools.move({ ...p });
-      tap = { id: e.pointerId, x: p.x, y: p.y, started: false, done: false, timer: setTimeout(longPress, LONG_MS) };
+      tap = { id: e.pointerId, x: p.x, y: p.y, started: false, done: false, orbit: null, timer: setTimeout(longPress, LONG_MS) };
+      loupe.show(p);
       return;
     }
     ui.over.setPointerCapture(e.pointerId);
+    // a pen's eraser end (Pointer Events: button 5, buttons 32) is the Eraser while it touches; the tip brings back the tool
+    // you had (Warren, 2026-10-15: "its eraser end doesn't switch to the ModelCraft Eraser tool")
+    if (e.pointerType === 'pen') {
+      if (penEraser(e)) {
+        if (tools.name !== 'erase') { if (tools.tool.busy) tools.escape(); penBack = tools.name; setTool('erase'); }
+        hideHint();
+        host.mouse = p;
+        tools.down({ ...p, ...mods(e) });
+        return;
+      }
+      if (penBack && e.button === 0) { const back = penBack; penBack = null; if (tools.name === 'erase') setTool(back); }
+    }
     // Blender style: right-click cancels what a tool is doing; Alt + left-drag orbits (Alt+Shift pans) for
     // trackpads and mice without a middle button; Ctrl + middle-drag zooms
     if (blender() && e.button === 2 && tools.tool.busy) { tools.escape(); e.preventDefault(); return; }
     const altCam = blender() && e.button === 0 && e.altKey && e.pointerType !== 'touch';
+    // 0.5 IP.3: what the middle and right buttons do comes from the menu style (null = ModelCraft's own); Shift swaps orbit and pan
+    const styled = (e.button === 1 || e.button === 2) && !altCam ? action3d(e.button) : null;
+    if (styled === 'none') { e.preventDefault(); return; }
+    if (styled) {
+      camDrag = { x: p.x, y: p.y, x0: p.x, y0: p.y, pan: styled === 'pan' ? !e.shiftKey : styled === 'orbit' && e.shiftKey, zoom: styled === 'zoom' || (blender() && e.button === 1 && (e.ctrlKey || e.metaKey)) };
+      e.preventDefault();
+      return;
+    }
     if (e.button === 1 || e.button === 2 || altCam) {
       camDrag = { x: p.x, y: p.y, x0: p.x, y0: p.y, pan: e.button === 2 || e.shiftKey, zoom: blender() && e.button === 1 && (e.ctrlKey || e.metaKey) };
       e.preventDefault();
@@ -389,27 +654,34 @@ function init(root) {
           const c = { x: pts.reduce((a, q) => a + q.x, 0) / pts.length, y: pts.reduce((a, q) => a + q.y, 0) / pts.length };
           const d = pts.length === 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0;
           if (pts.length !== pinch.n) { pinch.n = pts.length; pinch.c = c; pinch.d = d; return; }
-          if (pts.length >= 3) cam.pan(c.x - pinch.c.x, c.y - pinch.c.y);
-          else {
-            if (c.x !== pinch.c.x || c.y !== pinch.c.y) cam.orbit(c.x - pinch.c.x, c.y - pinch.c.y);
-            if (d > 10 && pinch.d > 10 && Math.abs(d - pinch.d) > 0.5) cam.zoomAt(pinch.d / d, c.x, c.y);
-          }
+          // two fingers pan (or orbit, settings.touch2) and pinch; three do the other
+          const move = (pts.length >= 3) === (settings.touch2 === 'orbit') ? 'pan' : 'orbit';
+          if (c.x !== pinch.c.x || c.y !== pinch.c.y) cam[move](c.x - pinch.c.x, c.y - pinch.c.y);
+          if (pts.length === 2 && d > 10 && pinch.d > 10 && Math.abs(d - pinch.d) > 0.5) cam.zoomAt(pinch.d / d, c.x, c.y);
           pinch.c = c; pinch.d = d;
           view.invalidate();
         });
         return;
       }
       if (pinch) return;
+      if (tap && e.pointerId === tap.id && tap.orbit) {
+        // held still on nothing, then moved: one-finger orbit
+        cam.orbit(p.x - tap.orbit.x, p.y - tap.orbit.y);
+        tap.orbit = { x: p.x, y: p.y };
+        view.invalidate();
+        return;
+      }
       if (tap && e.pointerId === tap.id && !tap.done) {
         host.mouse = p;
         if (!tap.started) {
-          if (Math.hypot(p.x - tap.x, p.y - tap.y) < MOVE_PX) { tools.move({ ...p }); return; }
+          if (Math.hypot(p.x - tap.x, p.y - tap.y) < MOVE_PX) { tools.move({ ...p }); loupe.show(p); return; }
           // it moves: a press–drag from where the finger went down
           clearTimeout(tap.timer); tap.started = true;
           hideHint();
           tools.down({ x: tap.x, y: tap.y });
         }
         tools.move({ ...p });
+        loupe.show(p);
         return;
       }
       if (tap?.done) return;
@@ -429,6 +701,7 @@ function init(root) {
     const p = pos(e);
     if (e.pointerType === 'touch') {
       touches.delete(e.pointerId);
+      loupe.hide();
       if (pinch) { if (!touches.size) pinch = null; return; }
       if (tap && e.pointerId === tap.id) {
         const t = tap;
@@ -441,11 +714,11 @@ function init(root) {
       return;
     }
     if (camDrag) { camDrag = null; return; }
-    if (e.button !== 0 && e.type === 'pointerup') return;
+    if (e.button !== 0 && !(e.pointerType === 'pen' && e.button === 5) && e.type === 'pointerup') return;
     tools.up({ ...p, ...mods(e) });
   };
   ui.over.addEventListener('pointerup', endPointer);
-  ui.over.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); pinch = null; camDrag = null; if (tap && tap.id === e.pointerId) { clearTimeout(tap.timer); tap = null; } });
+  ui.over.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); pinch = null; loupe.hide(); camDrag = null; if (tap && tap.id === e.pointerId) { clearTimeout(tap.timer); tap = null; } });
   // the touch bar (S.8): what the keyboard's Enter, Esc and Ctrl+Z do
   root.querySelector('[data-touchbar]')?.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-touch]');
@@ -487,7 +760,7 @@ function init(root) {
     }
     if (best < Infinity) pivot = [r.o[0] + r.d[0] * best, r.o[1] + r.d[1] * best, r.o[2] + r.d[2] * best];
     // a pinch sends small deltas: zoom it faster than a wheel notch
-    const k = Math.exp((e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY) * (e.ctrlKey ? 0.01 : 0.0015));
+    const k = Math.exp((e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY) * (e.ctrlKey ? 0.01 : 0.0015 * wheelFactor()));   // IP.3: the style's wheel (a pinch stays as it is)
     cam.zoomAt(k, p.x, p.y, pivot);
     view.invalidate();
   }, { passive: false });
@@ -499,7 +772,7 @@ function init(root) {
   const cursorEv = () => ({ ...(host.mouse || { x: view.w / 2, y: view.h / 2 }), shift: false, ctrl: false, alt: false });
   document.addEventListener('keydown', (e) => {
     if (e.defaultPrevented) return;
-    if (root.querySelector('dialog[open]')) return;
+    if (document.querySelector('dialog[open]')) return;   // the app's dialogs and the shell's (Settings: Esc must reach it, IP.3)
     if (e.key === 'Escape' && recording) { recording.stop = true; e.preventDefault(); return; }   // stop an animation being recorded (M23)
     const tgt = e.target;
     if (tgt === ui.vcb) {
@@ -1109,7 +1382,7 @@ function init(root) {
 
   // ---- panels: outliner, components, entity info ----
   let infoTimer = 0;
-  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); }); }
+  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); renderLights(); }); }
   let scenesSeen = '';
   function renderScenesIfChanged() { const k = JSON.stringify(model.scenes.map((s) => s.name)) + sceneIndex; if (k !== scenesSeen) { scenesSeen = k; renderScenes(); } }
 
@@ -1561,6 +1834,8 @@ function init(root) {
     adoc.clean();
     sceneIndex = -1;
     view.style = { ...view.style, mode: 'shaded', edges: true, shadows: false };
+    renderSettings = null;
+    model.images.clear();
     styleToUi();
     cam.eye = [9, -12, 8]; cam.target = [0, 0, 1];
     setTool('select');
@@ -1572,13 +1847,16 @@ function init(root) {
   const fileHost = getHost({ app: 'modelcraft' });
   let saveTarget = null;   // the HostFile the open model came from, when Save can write it in place
   const MODEL_TYPES = [{ description: t('app.file.type.model'), extensions: ['.modelcraft'] }];
-  const IMPORT_TYPES = [{ description: t('app.file.type.import'), extensions: ['.dae', '.obj', '.glb', '.gltf', '.dwg', '.dxf'] }];
+  const IMPORT_TYPES = [{ description: t('app.file.type.import'), extensions: ['.skp', '.dae', '.obj', '.glb', '.gltf', '.dwg', '.dxf'] }];
   const download = (bytes, name, type) => fileHost.download(bytes instanceof Blob || typeof bytes === 'string' ? bytes : new Blob([bytes], { type }), name, type);
   const base = () => fileName.replace(/\.(modelcraft|json)$/i, '') || t('app.file.untitled');
   const modelText = () => {
     // the file keeps the current camera and style for next time, outside the undo history
     const j = model.toJSON();
     j.view = { cam: cam.toJSON(), style: view.style };
+    const imgs = model.imagesJSON();
+    if (imgs.length) j.images = imgs;   // 0.5 RC.11 (b): imported textures, beside the model (outside undo)
+    if (renderSettings) j.view.render = renderSettings;   // 0.5 RC.11: the Render dialog's settings and looks
     return JSON.stringify(j);
   };
   async function saveModel() {
@@ -1592,11 +1870,32 @@ function init(root) {
     print(r.how === 'written' ? t('app.save.written', { file: r.path || r.name || name }) : t('app.save.downloaded', { file: name }));
     return true;
   }
+  // spikes (0.5): menu items that show only with ?spike=<name> in the address (lab experiments, never on by default)
+  { const sp = new URLSearchParams(location.search).get('spike'); root.querySelectorAll('[data-spike]').forEach((b) => { b.hidden = b.dataset.spike !== sp; }); }
   root.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', async () => {
     closeMenus();
     tools.escape();
     const kind = b.dataset.export;
     try {
+      if (kind === 'print3d') { await print3d(); return; }
+      if (kind === 'render') {
+        // a rendered picture of the view (0.5 RC.11): the shared renderer in render/, ModelCraft's adapter render-mc.js
+        if (!model.root.faces.size && !model.root.insts.size) { print(t('app.export.empty')); return; }
+        const [{ openRenderDialog }, { mcScene, mcColors }] = await Promise.all([import('./render/render-ui.js'), import('./render-mc.js')]);
+        openRenderDialog({
+          scene: (s) => mcScene(model, cam, view.style, s),
+          viewSize: () => ({ w: ui.gl.clientWidth, h: ui.gl.clientHeight }),
+          colors: () => mcColors(model),
+          modelSun: () => { const s = view.style.sun || {}; return { month: s.month || 6, day: s.day || 21, hour: s.hour ?? 15 }; },
+          settings: renderSettings,
+          save: (s) => { renderSettings = s; },
+          download: (blob, name) => download(blob, name, 'image/png'),
+          fileBase: base,
+          onClose: () => { view.invalidate(); ui.over.focus({ preventScroll: true }); },
+          parent: root,
+        });
+        return;
+      }
       if (kind === 'pdf' || kind === 'print') {
         // the view on a page (0.4 M13): twice its screen size, with what it shows (dimensions too), and a caption
         const blob = await view.png(2, kind === 'pdf' ? 'image/jpeg' : 'image/png', 0.92);   // i18n-ignore: media types
@@ -1654,6 +1953,42 @@ function init(root) {
     } catch (err) { print(t('app.export.failed', { error: err.message })); }
   }));
 
+  /**
+   * Check for 3D printing (0.5 SG.4, #531): the selection, or everything shown, as a printer mesh (mm, Z up) through
+   * print3d.js — closed, faces the right way, not passing through itself; size, volume, base, overhangs — then STL or
+   * 3MF of exactly that mesh. Both modules load on first use.
+   */
+  async function print3d() {
+    const [P, { printTriangles }] = await Promise.all([import('./print3d.js'), import('./print-mc.js')]);
+    const { tris, what } = printTriangles(model, { path: host.path, sel: host.sel });
+    print(t('app.print3d.checking'));
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const rep = P.printCheck(P.meshFromTriangles(tris));
+    const mm = (v) => (Math.round(v * 10) / 10).toLocaleString(i18n.locale() === 'en-XA' ? 'en' : i18n.locale());
+    const facts = el('ul', { className: 'mc-print-facts' },
+      el('li', {}, t(what === 'selection' ? 'app.print3d.what.sel' : 'app.print3d.what.all')),
+      rep.size ? el('li', {}, t('app.print3d.size', { w: mm(rep.size[0]), d: mm(rep.size[1]), h: mm(rep.size[2]) })) : null,
+      rep.volume != null ? el('li', {}, t('app.print3d.volume', { v: mm(rep.volume / 1000) })) : null,
+      el('li', {}, t('app.print3d.tris', { n: rep.triangles })));
+    const line = (k, x) => el('li', {}, t(k, x));
+    const problems = rep.problems.map((p) => line('app.print3d.p.' + p.kind, { n: p.n }));
+    const warnings = rep.warnings.map((w) => line('app.print3d.w.' + w.kind, { n: w.n || 0, share: Math.max(1, Math.round((w.share || 0) * 100)), angle: w.angle || 45 }));
+    const body = el('div', { className: 'mc-print' },
+      el('p', { className: 'mc-print-verdict', dataset: { printOk: rep.ok ? '1' : '0' } }, t(rep.ok ? 'app.print3d.ready' : 'app.print3d.notready')),
+      problems.length ? el('ul', { className: 'mc-print-problems', dataset: { printProblems: '' } }, ...problems) : null,
+      warnings.length ? el('ul', { className: 'mc-print-warnings', dataset: { printWarnings: '' } }, ...warnings) : null,
+      facts,
+      problems.length && rep.problems[0].kind !== 'empty' ? el('p', { className: 'mc-note' }, t('app.print3d.fixhint')) : null);
+    print(t(rep.ok ? 'app.print3d.ready' : 'app.print3d.notready'));
+    if (!rep.triangles) { await ask({ title: t('app.print3d.title'), body, buttons: [['cancel', t('app.btn.close'), 'btn-plot']] }); return; }
+    const key = await ask({ title: t('app.print3d.title'), body, buttons: [['cancel', t('app.btn.cancel'), 'btn-line'], ['stl', t('app.print3d.stl'), 'btn-line'], ['3mf', t('app.print3d.3mf'), 'btn-plot']] });
+    if (key !== 'stl' && key !== '3mf') return;
+    const file = base() + '.' + key;
+    if (key === 'stl') download(P.stlBinary(rep.mesh, 'ModelCraft ' + base()), file, 'model/stl');   // i18n-ignore: the STL header
+    else download(P.threeMF(rep.mesh, { name: base(), app: 'ModelCraft' }), file, 'model/3mf');   // i18n-ignore: an app name in the file
+    print(t('app.print3d.done', { file, n: rep.mesh.indices.length / 3 }));
+  }
+
   // the hidden inputs stay for browsers without the host picker's handles (and for tests: setInputFiles)
   ui.fileOpen.addEventListener('change', () => { const f = ui.fileOpen.files[0]; ui.fileOpen.value = ''; if (f) openFile(f); });
   ui.fileImport.addEventListener('change', () => { const f = ui.fileImport.files[0]; ui.fileImport.value = ''; if (f) importFile(f); });
@@ -1674,6 +2009,8 @@ function init(root) {
       if ((file.size || 0) > 200 * 1048576) throw new Error(t('app.open.toobig'));
       const j = JSON.parse(await file.text());
       tools.escape();
+      model.setImages(j.images);   // 0.5 RC.11 (b): the file's imported textures (untrusted: checked)
+      for (const k of [...texMats.keys()]) if (k.startsWith('img:')) texMats.delete(k);
       model.load(j);
       host.path = []; host.sel = [];
       saveTarget = null;
@@ -1681,6 +2018,7 @@ function init(root) {
       sceneIndex = -1;
       const v = j.view && cleanScene({ name: 'v', cam: j.view.cam, style: j.view.style });
       if (v) { cam.set(v.cam); view.style = v.style; perspBtn.setAttribute('aria-checked', String(cam.persp)); } else zoomExtents();
+      renderSettings = j.view && j.view.render && typeof j.view.render === 'object' ? j.view.render : null;   // cleaned when the dialog opens
       ui.units.value = model.units;
       styleToUi(); renderScenes(); setTool('select'); hideHint();
       scheduleInfo(); view.invalidate();
@@ -1695,14 +2033,14 @@ function init(root) {
   async function importFile(file) {
     const ext = (file.name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
     const name = file.name.replace(/\.[^.]+$/, '').slice(0, 80) || t('app.import.default');
-    if (!['dae', 'obj', 'glb', 'gltf', 'dwg', 'dxf'].includes(ext)) { print(t('app.import.kind', { file: file.name })); return; }
+    if (!['skp', 'dae', 'obj', 'glb', 'gltf', 'dwg', 'dxf'].includes(ext)) { print(t('app.import.kind', { file: file.name })); return; }
     try {
       if ((file.size || 0) > 300 * 1048576) throw new Error(t('app.import.toobig'));
       tools.escape();
       let r;
       if (ext === 'dxf' || ext === 'dwg') {
         // site plans: lines, polylines with bulges, circles, arcs and blocks → edges on the ground
-        let read;
+        let read, dwgModel = null;   // dwgModel: 0.5 DB.11 (its dynamic blocks are listed after the import)
         if (ext === 'dxf') {
           const text = await file.text();
           read = (m, opts) => importDXF(m, text, name, opts);
@@ -1712,6 +2050,7 @@ function init(root) {
           const { readDWG } = await import('./dwg-reader.js');
           await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));   // let the status paint: reading takes a moment on big files
           const dwg = await readDWG(bytes);
+          dwgModel = dwg;
           read = (m, opts) => importDWG(m, dwg, name, opts);
         }
         let unit = null;
@@ -1722,7 +2061,22 @@ function init(root) {
         r = model.change(t('app.undo.import_site'), (m) => { const x = read(m, { unit: unit || undefined }); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
         const R = r.report;
         if (!r.def.edges.size) print(t('app.import.site.empty', { file: file.name }) + skipped(R));
-        else print(t('app.import.site', { file: file.name, edges: r.def.edges.size }) + (r.def.faces.size ? ' ' + t('app.import.site.faces', { n: r.def.faces.size }) : '') + (R.texts ? ' ' + t('app.import.site.texts', { n: R.texts }) : '') + ' ' + t('app.import.site.group') + skipped(R));
+        else print(t('app.import.site', { file: file.name, edges: r.def.edges.size }) + (r.def.faces.size ? ' ' + t('app.import.site.faces', { n: r.def.faces.size }) : '') + (R.texts ? ' ' + t('app.import.site.texts', { n: R.texts }) : '') + ' ' + t('app.import.site.group') + skipped(R) + dynamicNote(dwgModel));
+      } else if (ext === 'skp') {
+        // SketchUp: our own reader (cc-skp, ./skp/), loaded on the first .skp
+        const bytes = await bytesOf(file);
+        print(t('app.import.skp.reading', { file: file.name }));
+        const [{ readSkp }, { importSKP }] = await Promise.all([import('./skp/read.js'), import('./skp-import.js')]);
+        await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+        const skp = await readSkp(bytes);
+        r = model.change(t('app.undo.import_skp'), (m) => { const x = importSKP(m, skp, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        const rep = r.report;
+        print(t('app.import.skp.done', { file: file.name, version: rep.version, faces: rep.faces, n: rep.components })
+          + (rep.tags ? ' ' + t('app.import.skp.tags', { n: rep.tags }) : '')
+          + (rep.hidden ? ' ' + t('app.import.skp.hidden', { n: rep.hidden }) : '')
+          + (rep.untagged ? ' ' + t('app.import.skp.untagged', { n: rep.untagged }) : '')
+          + (rep.texturedKept ? ' ' + t('app.import.skp.textures_kept', { n: rep.texturedKept }) : '')
+          + (rep.textured > (rep.texturedKept || 0) ? ' ' + t('app.import.skp.textures', { n: rep.textured - (rep.texturedKept || 0) }) : '') + skipped(rep));
       } else if (ext === 'dae') {
         const text = await file.text();
         r = model.change(t('app.undo.import_dae'), (m) => { const x = importDAE(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
@@ -1764,11 +2118,11 @@ function init(root) {
 
   // ---- dialogs ----
   function focusView() { if (document.activeElement === ui.over) ui.over.blur(); ui.over.focus({ preventScroll: true }); }
-  function ask({ title, text, buttons }) {
+  function ask({ title, text, body, buttons }) {
     return new Promise((done) => {
       const dlg = el('dialog', { className: 'mc-dialog', 'aria-labelledby': 'mc-ask-h' },
         el('div', { className: 'mc-dialog-head' }, el('h2', { className: 'mc-h', id: 'mc-ask-h' }, title)),
-        el('p', { className: 'mc-dialog-text' }, text),
+        body ? el('div', { className: 'mc-dialog-text' }, body) : el('p', { className: 'mc-dialog-text' }, text),
         el('div', { className: 'mc-dialog-foot' }, ...buttons.map(([key, label, cls]) => el('button', { type: 'button', className: cls + ' btn-sm-cc', dataset: { key } }, label))));
       let result = 'cancel';
       dlg.addEventListener('click', (e) => { const b = e.target.closest('button[data-key]'); if (b) { result = b.dataset.key; dlg.close(); } });
@@ -2100,6 +2454,8 @@ function init(root) {
   print(t('app.units.start', { unit: unitWords(model.units) }));
   // desktop: the file the app was started with (double-click, "Open with")
   fileHost.launchFiles().then((files) => openFromHost(files[0], { asked: true })).catch(() => {});
+  // Studio Live from a link (#live=<code> on a host's LAN page, ?live=<ROOM>#<secret> from an invite): join; the model comes from the host
+  if (/[#&]live=|[?&]live=/.test(location.hash + location.search)) import('./live.js').then((m) => m.joinFromPage(window.modelcraft, fileHost), (err) => print(err.message));
   // ?handoff=<id>: another app ("Open in ModelCraft" in CadCraft) left a file for this tab (handoff.js); it comes in
   // as if dropped here — a DWG or DXF lands as a site plan in a group.
   const handoff = handoffParam(location.search);

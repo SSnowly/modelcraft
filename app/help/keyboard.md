@@ -6,7 +6,7 @@ order: 10
 keywords: keyboard, shortcuts, keys, hotkeys, mouse, trackpad, touch, gestures, cheat sheet, ctrl, command, arrow keys
 ---
 
-These are the SketchUp-style keys, the ones ModelCraft starts with. For the other style, see [Blender-style keys](topic:keyboard#blender-style-keys) below and [ModelCraft settings](topic:settings).
+These are the push-pull keys, the ones ModelCraft starts with. For the other style, see [Modeler keys](topic:keyboard#modeler-keys) below and [ModelCraft settings](topic:settings).
 
 Shortcuts work when the 3D view or a toolbar button has focus. If you just typed in a panel field or changed a list in {{ui:Style}}, click in the 3D view first, or your keys go to that field. See [Keys, mice and trackpads](common:keys) for how keys are written on each computer.
 
@@ -123,9 +123,9 @@ What a two-finger swipe does depends on {{ui:Settings}} › {{ui:ModelCraft}} �
 
 See [Orbit, pan and zoom](topic:orbit-pan-zoom#on-a-trackpad) and [ModelCraft settings](topic:settings#scrolling-mouse-wheel-or-trackpad).
 
-## Blender-style keys
+## Modeler keys
 
-With {{ui:Settings}} › {{ui:ModelCraft}} › Controls set to Blender style:
+With {{ui:Settings}} › {{ui:ModelCraft}} › Controls set to Modeler style:
 
 | Key | Does |
 |---|---|
@@ -163,7 +163,9 @@ Copy, paste, undo, save and open keep the keys listed above. Typed values, the v
 | Double-tap | A double-click |
 | Press, drag, lift | Same as press, drag, release with a mouse |
 | Two fingers: pinch | Zoom |
-| Two fingers: move together | Pan |
+| Two fingers: move together | Pan (Settings › ModelCraft › Touch screen can make it Orbit) |
+| Three fingers: move together | Orbit (Pan when two fingers orbit) |
+| Hold one finger still | Finishes the tool, as Enter; with nothing going on, then drag to orbit |
 | A second finger during a one-finger action | Cancels that action |
 | {{ui:Orbit}} tool, then drag one finger | Orbit |
 

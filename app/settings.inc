@@ -4,8 +4,9 @@
  * settings.inc — ModelCraft's own panel of the Settings dialog (core/components/app-settings.inc includes it,
  * as the "ModelCraft" tab). modelcraft.js reads and stores the fields (localStorage modelcraft.settings) and
  * resets them on "cc-settings-reset".
- *   keys      SketchUp style (default) / Blender style: shortcut keys and mouse buttons
+ *   keys      Push-pull style (default) / Modeler style (stored "sketchup" / "blender"): shortcut keys and mouse buttons
  *   scroll    auto (default) / mouse (the wheel zooms) / trackpad (two fingers orbit, Shift pans, pinch zooms)
+ *   touch2    two fingers pan (default; three orbit) / two fingers orbit (three pan); both pinch-zoom
  *   snap      snap to points, edges and axes (default on; also the Snap button in the status bar)
  *   collide   solids stop where they touch instead of passing through (default on; also the status bar button)
  *   corner    corner indicator: view cube (default) / axis icon / none
@@ -28,6 +29,14 @@
     <label><input type="radio" name="mcScroll" value="trackpad"> <i class="bi bi-hand-index" aria-hidden="true"></i> <?= Lang::e('set.scroll.trackpad') ?></label>
   </div>
   <p class="shell-hint-text"><?= Lang::e('set.scroll.hint') ?></p>
+</fieldset>
+<fieldset class="shell-set">
+  <legend><?= Lang::e('set.touch2') ?></legend>
+  <div class="shell-seg mc-set-seg2" role="radiogroup" aria-label="<?= Lang::e('set.touch2') ?>">
+    <label><input type="radio" name="mcTouch2" value="pan"> <i class="bi bi-arrows-move" aria-hidden="true"></i> <?= Lang::e('set.touch2.pan') ?></label>
+    <label><input type="radio" name="mcTouch2" value="orbit"> <i class="bi bi-arrow-repeat" aria-hidden="true"></i> <?= Lang::e('set.touch2.orbit') ?></label>
+  </div>
+  <p class="shell-hint-text"><?= Lang::e('set.touch2.hint') ?></p>
 </fieldset>
 <fieldset class="shell-set">
   <legend><?= Lang::e('set.snap') ?></legend>

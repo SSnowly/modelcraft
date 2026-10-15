@@ -10,12 +10,12 @@ Open {{ui:Settings}} with the gear in the app bar or {{key:Mod+,}}. The first ta
 
 ## Controls: which keys and mouse buttons
 
-Two key styles. Switch them here, with {{ui:Keys: SketchUp}} / {{ui:Keys: Blender}} at the bottom right of the view, or at the end of the toolbar's {{ui:More}} menu:
+Two key styles. Switch them here, with {{ui:Keys: Push-pull}} / {{ui:Keys: Modeler}} at the bottom right of the view, or at the end of the toolbar's {{ui:More}} menu:
 
-- **SketchUp style** (the start): a letter picks a tool — {{key:L}} line, {{key:R}} rectangle, {{key:P}} push/pull, {{key:M}} move, {{key:Q}} rotate, {{key:S}} scale, {{key:G}} make component. See [Keys and mouse actions](topic:keyboard).
-- **Blender style**: select first, then act on the selection straight away. {{key:G}} moves it, {{key:R}} rotates it and {{key:S}} scales it from where the pointer is — no first click. While it moves, {{key:X}}, {{key:Y}} or {{key:Z}} locks the red, green or blue axis, a typed number sets the distance (or degrees, or factor), and a click or {{key:Enter}} puts it down; {{key:Esc}} or a right-click puts it back. Then you are back in {{ui:Select}}.
+- **Push-pull style** (the start; the letters of push-pull modelers such as SketchUp): a letter picks a tool — {{key:L}} line, {{key:R}} rectangle, {{key:P}} push/pull, {{key:M}} move, {{key:Q}} rotate, {{key:S}} scale, {{key:G}} make component. See [Keys and mouse actions](topic:keyboard).
+- **Modeler style** (the keys of mesh modelers such as Blender): select first, then act on the selection straight away. {{key:G}} moves it, {{key:R}} rotates it and {{key:S}} scales it from where the pointer is — no first click. While it moves, {{key:X}}, {{key:Y}} or {{key:Z}} locks the red, green or blue axis, a typed number sets the distance (or degrees, or factor), and a click or {{key:Enter}} puts it down; {{key:Esc}} or a right-click puts it back. Then you are back in {{ui:Select}}.
 
-The full Blender-style list is in [Keys and mouse actions](topic:keyboard#blender-style-keys). The tooltips on the toolbar and the start card follow the style you pick.
+The key style is the same choice as the menu style: the Modeler key style is the {{ui:Modeler}} menu style, and picking one picks the other. See [Menus, keys and mouse](topic:menus-keys-and-mouse). The full Modeler list is in [Keys and mouse actions](topic:keyboard#modeler-keys). The tooltips on the toolbar and the start card follow the style you pick.
 
 ## Scrolling: mouse wheel or trackpad
 
@@ -26,14 +26,14 @@ The full Blender-style list is in [Keys and mouse actions](topic:keyboard#blende
 A pinch zooms in every choice. If "Work it out" guesses wrong for your mouse or trackpad, pick the one you have.
 
 :::tip
-In Blender style you can also orbit by holding {{key:Alt}} and dragging, and pan with {{key:Alt+Shift}} and a drag — handy on a laptop without a middle button.
+In the Modeler style you can also orbit by holding {{key:Alt}} and dragging, and pan with {{key:Alt+Shift}} and a drag — handy on a laptop without a middle button.
 :::
 
 ## Snapping
 
 **Snap to points, edges and axes** (on at the start) pulls the pointer to endpoints, midpoints, edges, guides and the red, green and blue axes — see [Inference](topic:inference). Turn it off when you want to place something freely near other geometry without it jumping. Faces, the ground and the axis locks still work with snapping off.
 
-The {{ui:Snap}} button at the bottom right of the view does the same for this session's work (it is saved too). In Blender style, {{key:Shift+Tab}} switches it.
+The {{ui:Snap}} button at the bottom right of the view does the same for this session's work (it is saved too). In the Modeler style, {{key:Shift+Tab}} switches it.
 
 ## Solids stop where they touch
 

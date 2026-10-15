@@ -3,7 +3,7 @@ title: Push and pull faces into solids
 summary: Turn a face into a box, make a building taller or shorter, add a bay or a recess, and repeat a distance with a double-click.
 section: tasks
 order: 30
-keywords: push pull, extrude, height, solid, box, mass, taller, recess, bump out, repeat, double-click, volume
+keywords: push pull, extrude, height, solid, box, mass, taller, recess, bump out, repeat, double-click, volume, level, on face, flush, same height
 ---
 
 {{ui:Push/pull}} ({{key:P}}) moves a face along its own direction: up and down for a floor, in and out for a wall. What happens depends on the face.
@@ -28,7 +28,11 @@ Instead of clicking twice, press on the face, drag, and release. On a touch scre
 
 While you pull, hover a corner, a midpoint, an edge or a guide of another part of the model. The face snaps to that height and a marker shows the point. Use it to make two blocks the same height, or to stop at a guide line you placed with the [tape measure](topic:guides-measure).
 
-Hovering a face does not snap; the height follows the pointer.
+You can also hover a face that is parallel to the one you are pushing, such as the top of another block or the top of the box a post stands on. The tip says "On face", and the face you are pushing ends level with it. For example, push the inner face of a pipe down until it is level with the box under the pipe.
+
+A face at an angle to the one you are pushing doesn't set a level. The distance follows the pointer. So does a face behind the face you are pushing.
+
+When a pushed face ends flush with the faces around it again, its sides go away. No zero-height sides are left over, and the outline you drew stays on the face, so you can push it again later.
 
 ## Make a box taller or shorter
 

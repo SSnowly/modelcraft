@@ -93,6 +93,7 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
                 <button type="button" role="menuitem" data-export="dae"><?= Lang::e('ui.export.dae') ?></button>
                 <button type="button" role="menuitem" data-export="obj"><?= Lang::e('ui.export.obj') ?></button>
                 <button type="button" role="menuitem" data-export="stl"><?= Lang::e('ui.export.stl') ?></button>
+                <button type="button" role="menuitem" data-export="print3d"><?= Lang::e('ui.export.print3d') ?></button>
                 <button type="button" role="menuitem" data-export="ifc"><?= Lang::e('ui.export.ifc') ?></button>
                 <button type="button" role="menuitem" data-act="storeys"><?= Lang::e('ui.export.storeys') ?></button>
                 <button type="button" role="menuitem" data-export="dwg"><?= Lang::e('ui.export.dwg') ?></button>
@@ -102,6 +103,8 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
                 <button type="button" role="menuitem" data-export="png2"><?= Lang::e('ui.export.png2') ?></button>
                 <button type="button" role="menuitem" data-export="pdf"><?= Lang::e('ui.export.pdf') ?></button>
                 <button type="button" role="menuitem" data-export="print"><?= Lang::e('ui.export.print') ?></button>
+                <hr>
+                <button type="button" role="menuitem" data-export="render"><?= Lang::e('ui.export.render') ?></button>
               </div>
             </details>
           <?php endif; ?>
@@ -176,7 +179,7 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
       </div>
     <?php endforeach; ?>
     <input type="file" class="visually-hidden" accept=".modelcraft,.json" tabindex="-1" aria-hidden="true" data-file-open>
-    <input type="file" class="visually-hidden" accept=".dae,.obj,.glb,.gltf,.dwg,.dxf" tabindex="-1" aria-hidden="true" data-file-import>
+    <input type="file" class="visually-hidden" accept=".skp,.dae,.obj,.glb,.gltf,.dwg,.dxf" tabindex="-1" aria-hidden="true" data-file-import>
   </div>
 
   <aside class="mc-panel mc-left" aria-label="<?= Lang::e('ui.left.aria') ?>">
@@ -233,6 +236,24 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
       <h2 class="mc-h" id="mc-colors-h"><?= Lang::e('ui.colors') ?></h2>
       <div class="mc-palette" data-palette role="radiogroup" aria-labelledby="mc-colors-h"></div>
       <p class="mc-note" data-palette-note><?= Lang::e('ui.colors.note') ?></p>
+    </section>
+    <?php /* Materials (0.5 RC.7, session render): the library in render/materials.js, built by modelcraft.js "Materials". */ ?>
+    <section class="mc-sec">
+      <h2 class="mc-h" id="mc-mats-h"><?= Lang::e('ui.materials') ?></h2>
+      <div class="mc-matlib" data-matlib role="radiogroup" aria-labelledby="mc-mats-h"></div>
+      <p class="mc-note"><?= Lang::e('ui.materials.note') ?></p>
+    </section>
+    <?php /* Lights (0.5 RC.11 (d), session render): lamps for rendered pictures; modelcraft.js "Lights". */ ?>
+    <section class="mc-sec" data-lights-sec>
+      <h2 class="mc-h" id="mc-lights-h"><?= Lang::e('ui.lights') ?></h2>
+      <div class="mc-lights-add" role="group" aria-labelledby="mc-lights-h">
+        <button type="button" class="btn-line btn-sm-cc" data-light-add="point"><i class="bi bi-lightbulb" aria-hidden="true"></i> <?= Lang::e('ui.lights.point') ?></button>
+        <button type="button" class="btn-line btn-sm-cc" data-light-add="spot"><i class="bi bi-lamp" aria-hidden="true"></i> <?= Lang::e('ui.lights.spot') ?></button>
+        <button type="button" class="btn-line btn-sm-cc" data-light-add="area"><i class="bi bi-grid-3x3" aria-hidden="true"></i> <?= Lang::e('ui.lights.area') ?></button>
+      </div>
+      <ul class="mc-list mc-lights" data-lights aria-labelledby="mc-lights-h"></ul>
+      <div class="mc-props" data-light-edit hidden></div>
+      <p class="mc-note"><?= Lang::e('ui.lights.note') ?></p>
     </section>
     <section class="mc-sec">
       <h2 class="mc-h" id="mc-tags-h"><?= Lang::e('ui.tags') ?></h2>
@@ -302,6 +323,7 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
     <form class="mc-vcb" data-vcb-form autocomplete="off">
       <label for="mc-vcb" class="mc-vcb-label" data-vcb-label><?= Lang::e('ui.vcb') ?></label>
       <input type="text" id="mc-vcb" class="mc-vcb-input" data-vcb spellcheck="false" autocapitalize="off" inputmode="text">
+      <button type="button" class="mc-toggle mc-vcb-kbd" data-vcb-kbd aria-pressed="false" title="<?= Lang::e('ui.vcb.kbd.title') ?>" hidden><?= Lang::e('ui.vcb.kbd') ?></button>
     </form>
     <label class="visually-hidden" for="mc-keys"><?= Lang::e('ui.keys') ?></label>
     <select id="mc-keys" class="mc-select mc-units" data-mc-keys title="<?= Lang::e('ui.keys.title') ?>">

@@ -3,7 +3,7 @@ title: Model on a site plan from a DWG or DXF
 summary: Bring a CAD site or floor plan in as lines on the ground, answer the units question, and trace it into faces and masses.
 section: tasks
 order: 100
-keywords: site plan, dwg, dxf, cad, import, text, hatch, spline, ellipse, 3d face, trace, floor plan, lot, property line, units, underlay, context
+keywords: site plan, dwg, dxf, cad, import, dynamic blocks, visibility states, text, hatch, spline, ellipse, 3d face, trace, floor plan, lot, property line, units, underlay, context
 ---
 
 ModelCraft can bring in the lines of a 2D CAD drawing, a site plan or a floor plan, and lay them on the ground so you can model on top of them.
@@ -27,6 +27,7 @@ ModelCraft can bring in the lines of a 2D CAD drawing, a site plan or a floor pl
 - **3D faces** and solid fills become faces; 3D faces keep their heights.
 - **Text** (single-line text, multiline text and attribute values) is drawn as edges in a simple single-stroke lettering, at the text's own height, angle and alignment. Its font is not the drawing's, so the words may run a little longer or shorter. Characters the lettering has no shape for are drawn as small boxes and counted.
 - **Dimensions** are drawn as the drawing shows them (their lines, arrowheads and text, as edges and faces).
+- **Dynamic blocks** come in as the drawing shows them: each placed block in the visibility state it was saved with, and only that state's lines. The status bar lists them with the states shown and the other states each one has, for example "Receptacle shown as Duplex ×38, GFI ×7 (states: Duplex, GFI)". ModelCraft does not switch states.
 - Not imported: points, tables, multileaders, regions, 3D solids, images and other object types. The status bar lists them by type, such as "Not imported: 12 POINT." Anything on a layout (paper space) is left out too, without being listed.
 - Layers are not kept: all lines come in alike.
 

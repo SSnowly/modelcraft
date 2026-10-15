@@ -3,7 +3,7 @@ title: Export a model for other programs
 summary: Choose the right export for rendering, the web, 3D printing, BIM and BimCraft, and check what each one keeps.
 section: tasks
 order: 130
-keywords: print, pdf, paper, image, png, picture, screenshot, render, save view, export, share, render, rendering, gltf, glb, collada, dae, obj, stl, 3d print, ifc, bim, bimcraft, send, other software
+keywords: print, 3mf, pdf, paper, image, png, picture, screenshot, render, save view, export, share, render, rendering, gltf, glb, collada, dae, obj, stl, 3d print, ifc, bim, bimcraft, send, other software
 ---
 
 Export makes a copy of the model in another format. Keep your `.modelcraft` file too: it is the only file that keeps everything, and the only one ModelCraft opens directly.
@@ -23,7 +23,7 @@ The whole model is exported. To export one part, save, erase the rest, export, t
 | Open it in another 3D modeler | {{ui:Collada (.dae)}} | Keeps groups, nested groups, components (shared, not copied), names and colors. Z up, meters. |
 | Render it, or use it in a visualization program | {{ui:OBJ (.obj)}} or {{ui:glTF binary (.glb)}} | OBJ is the most widely read; it writes each group placement as a separate object, but has no colors and no shared components. glTF keeps components and colors. |
 | Put it on the web, in a game engine or in AR | {{ui:glTF binary (.glb)}} | One file with everything in it. |
-| Print it in 3D | {{ui:STL for printing (.stl, millimeters)}} | Written in millimeters, the unit printer software expects. Export closed solids. |
+| Print it in 3D | {{ui:Check for 3D printing (STL or 3MF)…}} | Checks the model is closed and faces the right way, then writes STL or 3MF in millimeters. See [Get a model ready for 3D printing](topic:print-3d). {{ui:STL for printing (.stl, millimeters)}} writes the whole model without the check. |
 | Open it in BimCraft or another BIM program | {{ui:IFC for BimCraft (.ifc)}} | Each top-level group or component becomes one building element. |
 
 The status bar confirms each export, for example "Exported House.stl (millimeters)." or "Exported House.dae (Collada 1.4.1, Z up, meters; components stay shared)."
@@ -50,6 +50,8 @@ Edges that are not part of any face (guide-like lines, an imported site plan) go
 ## Save the view as an image
 
 {{ui:Export}} › {{ui:Image of the view (.png)}} saves exactly what the 3D view shows, at its size on screen. {{ui:Image at twice the size (.png)}} saves it twice as wide and twice as tall (for print or a sharp slide), with dimensions and marks redrawn at that size rather than stretched.
+
+For a picture that looks like daylight (sky, sun, soft shadows, glass), use {{ui:Export}} › {{ui:Render a picture…}} instead: see [Render a picture](topic:render).
 
 For a clean picture, turn on [presentation view](topic:styles-shadows#presentation-view) ({{key:Shift+P}}) first: the axes, guides, section outlines and the selection are left out. Set up the camera, style and shadows the way you want them, or go to a [scene](topic:scenes); to save a moving film of your scenes, use {{ui:Export animation}} in the {{ui:Scenes}} panel.
 

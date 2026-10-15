@@ -2233,6 +2233,220 @@ section('view cube with this build\'s camera');
   const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/formats.mjs'));
   await run({ ok, close, section, APP, OUT, ROOT, VERBOSE });
 }
+section('SketchUp import (0.5, cc-skp + skp-import.js)');
+{
+  const { importSKP } = await import(path.join(APP, 'skp-import.js'));
+  // a hand-made cc-skp model (inches, Z up): a component painted red and blue by its two placements, a group, a loose
+  // edge, a soft edge, tags (a hidden one; a group on a shown one), and things SketchUp would not show (a hidden placement,
+  // a face on a hidden tag, a hidden loose edge)
+  const sq = (s, z = 0) => [[[0, 0, z], [s, 0, z], [s, s, z], [0, s, z]]];
+  const tr = (x) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1];
+  const skp = {
+    format: 'skp', container: 'legacy', version: '6.0.1', major: 6,
+    materials: [{ name: 'Red', color: [255, 0, 0], alpha: 1, texture: null }, { name: 'Blue', color: [0, 0, 255], alpha: 1, texture: null },
+      { name: 'Wood', color: null, alpha: 1, texture: { name: 'wood.jpg' } }],
+    layers: [{ name: 'Layer0', visible: true, color: null }, { name: 'Off', visible: false, color: null }, { name: 'Doors', visible: true, color: null }],
+    defs: [
+      { name: 'Model', kind: 'model', faces: [{ loops: sq(100), front: 2, back: null, layer: 0 }, { loops: sq(50, 10), front: null, back: null, layer: 1 }],
+        edges: [{ a: [0, 0, 0], b: [0, 0, 100], layer: 0, soft: false, smooth: false, hidden: false }, { a: [0, 0, 0], b: [0, 100, 100], layer: 0, soft: false, smooth: false, hidden: true }], soft: [],
+        insts: [{ def: 1, m: tr(10), name: 'C1', layer: 0, hidden: false, material: 0 }, { def: 1, m: tr(20), name: '', layer: 0, hidden: false, material: 1 },
+          { def: 1, m: tr(30), name: '', layer: 0, hidden: true, material: 0 }, { def: 2, m: tr(0), name: 'G', layer: 2, hidden: false, material: null },
+          { def: 2, m: tr(40), name: 'OffBoard', layer: 1, hidden: false, material: null }] },
+      { name: 'Cap', kind: 'component', faces: [{ loops: sq(1), front: null, back: null, layer: 0 }, { loops: [[[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]]], front: null, back: null, layer: 0 }],
+        edges: [], soft: [[[0, 0, 0], [1, 0, 0]]], insts: [] },
+      { name: 'Board', kind: 'group', faces: [{ loops: sq(2), front: 0, back: null, layer: 2 }], edges: [], soft: [], insts: [] },
+    ],
+    root: 0, thumbnail: null, units: { length: 'in' }, notes: [], counts: {},
+  };
+  const m = new M.Model();
+  const r = m.change('Import SketchUp model', (mm) => { const x = importSKP(mm, skp, 'PIMETA'); mm.place(mm.root, x.def.id, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); return x; });
+  const top = r.def;
+  ok(top.kind === 'group' && top.name === 'PIMETA', 'the import is one group named after the file');
+  const caps = [...m.defs.values()].filter((d) => d.name === 'Cap');
+  ok(caps.length === 1 && caps[0].kind === 'component', 'a component painted two colours stays one component: ' + caps.length);
+  const capInsts = [...top.insts.values()].filter((i) => i.def === caps[0]?.id);
+  ok(capInsts.length === 3 && [...caps[0].faces.values()].every((f) => f.color == null), 'its faces keep no colour of their own; 3 placements');
+  const paints = capInsts.map((i) => i.color).sort();
+  ok(JSON.stringify(paints) === JSON.stringify(['#0000ff', '#ff0000', '#ff0000']), 'the material on each placement becomes its paint: ' + paints);
+  const shownCap = (c) => { let n = 0; m.walkShown((d, mm, p, col) => { if (d === caps[0] && col === c) n++; }); return n; };
+  ok(shownCap('#ff0000') === 1 && shownCap('#0000ff') === 1, 'on screen: one red copy, one blue (the hidden one not drawn)');
+  const hid = capInsts.filter((i) => i.hidden);
+  ok(hid.length === 1 && close(hid[0].m[12], 30 * 0.0254), 'the hidden placement comes in hidden');
+  ok(m.tag('Off') && m.tag('Off').hidden === true && m.tag('Doors') && !m.tag('Doors').hidden, 'tags come over, hidden as in SketchUp: ' + JSON.stringify(m.tags));
+  const g = [...top.insts.values()].find((i) => i.name === 'G');
+  ok(g && g.tag === 'Doors', 'a group on a tag carries it');
+  const tf = [...top.faces.values()];
+  ok(tf.length === 2 && tf.filter((f) => f.hidden).length === 1, 'the face on a hidden tag comes in hidden');
+  ok([...top.edges.values()].filter((e) => e.hidden).length === 1, 'a hidden loose edge comes in hidden');
+  ok(r.report.hidden === 3, 'hidden things are counted (a placement, a face, an edge): ' + r.report.hidden);
+  ok(r.report.tags === 2 && r.report.untagged === 1, 'report: 2 tags added, 1 face on a shown tag left untagged: ' + r.report.tags + '/' + r.report.untagged);
+  ok(tf.find((f) => !f.hidden && f.color == null), 'a textured material with no colour gives no colour');
+  ok(r.report.textured === 1, 'textured faces are counted: ' + r.report.textured);
+  const p = [...top.verts.values()].reduce((a, v) => Math.max(a, v[0]), 0);
+  ok(close(p, 100 * 0.0254), 'inches become meters: ' + p);
+  const c1 = [...top.insts.values()].find((i) => i.name === 'C1');
+  ok(c1 && close(c1.m[12], 10 * 0.0254), 'a placement\'s move becomes meters, named as in the file');
+  ok(caps.every((d) => [...d.edges.values()].some((e) => e.soft)), 'soft edges from the file stay soft');
+  ok([...top.edges.values()].some((e) => { const a = top.verts.get(e.a), b = top.verts.get(e.b); return !e.hidden && close(Math.abs(a[2] - b[2]), 100 * 0.0254); }), 'a loose edge is kept');
+  ok(r.report.components === 1 && r.report.groups === 1, 'report counts components and groups');
+  const board = [...m.defs.values()].find((d) => d.name === 'Board');
+  let boards = 0; m.walkShown((d) => { if (d === board) boards++; });
+  ok([...top.insts.values()].find((i) => i.name === 'OffBoard')?.tag === 'Off' && boards === 1, 'a group on a hidden tag carries it and is not drawn: ' + boards);
+  const m2 = new M.Model();
+  m2.tags.push({ name: 'Doors', hidden: true });
+  const r2 = m2.change('again', (mm) => importSKP(mm, skp, 'again'));
+  ok(m2.tags.filter((x) => x.name.toLowerCase() === 'doors').length === 1 && m2.tag('Doors').hidden === true && r2.report.tags === 1, 'a tag the model already has is reused as it is');
+  const json = JSON.parse(JSON.stringify(m.toJSON()));
+  const back = new M.Model(); back.load(json);
+  ok(back.tag('Off')?.hidden === true && [...back.defs.values()].some((d) => [...d.insts.values()].some((i) => i.tag === 'Doors')), 'tags and hidden survive save and reopen');
+  m.undo();
+  ok(!m.tag('Off') && !m.tag('Doors'), 'one undo takes the import and its tags away');
+  let msg = '';
+  try { importSKP(new M.Model(), { format: 'skp', defs: [], root: 0 }); } catch (err) { msg = err.message; }
+  ok(msg.length > 0, 'a model with nothing in it is refused: ' + msg);
+
+  // the real reader on the corpus (outside git; skipped when missing)
+  const CORPUS = '/var/www/CADCRAFT/testfiles/skp-corpus';
+  const READER = path.join(APP, 'skp/read.js');
+  if (!fs.existsSync(READER) || !fs.existsSync(CORPUS)) console.log('  (skipped: ' + (fs.existsSync(READER) ? CORPUS : READER) + ' missing)');
+  else {
+    const { readSkp } = await import(READER);
+    const files = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.skp$/i.test(e.name)) files.push(f); } };
+    walk(CORPUS);
+    for (const f of files) {
+      const name = path.relative(CORPUS, f);
+      try {
+        const s = await readSkp(new Uint8Array(fs.readFileSync(f)));
+        const mm = new M.Model();
+        const x = mm.change('import', (q) => { const y = importSKP(q, s, path.basename(f, '.skp')); q.place(q.root, y.def.id, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); return y; });
+        ok(x.report.faces > 0 || x.def.edges.size > 0 || x.def.insts.size > 0, `${name} (v${s.version}, ${s.container}) imports: ${x.report.faces} faces, ${x.report.components} components, ${x.report.groups} groups`);
+      } catch (err) {
+        const empty = /nothing to show/.test(err.message);
+        ok(err.name === 'SkpError' || empty, `${name}: ${err.code || ''} ${err.message}`);
+      }
+    }
+  }
+}
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/print3d.mjs'));
+  await run({ ok, close, section, APP, OUT, ROOT });
+}
+section('3D printing from a model: print-mc.js (0.5 SG.4)');
+{
+  const P = await import(path.join(APP, 'print3d.js'));
+  const { printTriangles } = await import(path.join(APP, 'print-mc.js'));
+  // a 20 mm cube made with the tools, as a component placed four times: painted red, painted blue, mirrored, hidden
+  const m = new Model();
+  const ids = m.change('cubes', (mm) => {
+    addPolygon(mm.root, rectPts([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.02, 0.02));
+    pushPull(mm.root, [...mm.root.faces.keys()][0], 0.02);
+    const a = mm.makeGroup(mm.root, M.connected(mm.root, [{ t: 'f', id: [...mm.root.faces.keys()][0] }]), 'component', 'Cube');
+    const d = mm.root.insts.get(a).def;
+    mm.root.insts.get(a).color = '#ff0000';
+    const b = mm.place(mm.root, d, V.translation([0.05, 0, 0])); mm.root.insts.get(b).color = '#0000ff';
+    const c = mm.place(mm.root, d, [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.15, 0, 0, 1]);
+    const h = mm.place(mm.root, d, V.translation([0.3, 0, 0])); mm.root.insts.get(h).hidden = true;
+    return { a, b, c, h };
+  });
+  const all = printTriangles(m);
+  const r = P.printCheck(P.meshFromTriangles(all.tris));
+  ok(all.what === 'all' && r.ok && r.shells === 3, 'everything shown: 3 cubes (the hidden copy left out), ready — ' + r.problems.map((x) => x.kind));
+  ok(close(r.volume, 3 * 8000, 1e-6), 'meters become millimeters: 3 × 8000 mm³ = ' + r.volume);
+  ok(r.inverted === 0, 'the mirrored copy is not inside out');
+  ok(close(r.size[0], 150, 1e-6) && close(r.size[2], 20, 1e-6) && close(r.bedArea, 3 * 400, 1e-6), 'size 150 × 20 × 20 mm, standing on three 400 mm² bases');
+  const cols = new Set(all.tris.map((x) => x.color));
+  ok(cols.has('#ff0000') && cols.has('#0000ff') && cols.has(null), 'colors as the view shows them: ' + [...cols]);
+  const one = printTriangles(m, { sel: [{ t: 'i', id: ids.b }] });
+  const r1 = P.printCheck(P.meshFromTriangles(one.tris));
+  ok(one.what === 'selection' && r1.ok && close(r1.volume, 8000, 1e-6) && one.tris.every((x) => x.color === '#0000ff'), 'the selection only: one blue cube');
+  m.change('tag', (mm) => { mm.tags.push({ name: 'Off', hidden: true }); mm.root.insts.get(ids.a).tag = 'Off'; });
+  ok(P.printCheck(P.meshFromTriangles(printTriangles(m).tris)).shells === 2, 'a copy on a hidden tag is left out');
+  ok(printTriangles(m, { sel: [{ t: 'i', id: ids.a }] }).tris.length === 0, 'a selected copy on a hidden tag prints nothing');
+  // a face selected inside the open component: just that face (open edges)
+  const cdef = m.root.insts.get(ids.b).def;
+  const f0 = [...m.defs.get(cdef).faces.keys()][0];
+  const rf = P.printCheck(P.meshFromTriangles(printTriangles(m, { path: [ids.b], sel: [{ t: 'f', id: f0 }] }).tris));
+  ok(!rf.ok && rf.open === 4, 'one face selected inside the cube: 4 open edges');
+  // a hole: erase the cube's top
+  const m2 = new Model();
+  m2.change('box', (mm) => { addPolygon(mm.root, rectPts([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.02, 0.02)); pushPull(mm.root, [...mm.root.faces.keys()][0], 0.02); });
+  const top = [...m2.root.faces].find(([, f]) => faceNormal(m2.root, f)[2] > 0.99)[0];
+  m2.change('hole', (mm) => { mm.root.faces.delete(top); });
+  const r2 = P.printCheck(P.meshFromTriangles(printTriangles(m2).tris));
+  ok(!r2.ok && r2.open === 4 && r2.problems[0].kind === 'open', 'a box with its top gone: 4 open edges');
+  // the files round-trip the mesh the check saw
+  const stl = P.stlBinary(r.mesh), mf = P.threeMF(r.mesh, { name: 'cubes', app: 'ModelCraft' });
+  ok(new DataView(stl.buffer).getUint32(80, true) === r.mesh.indices.length / 3 && mf[0] === 0x50 && mf[1] === 0x4b, 'STL and 3MF of the checked mesh');
+}
+section('push/pull to a face\'s level (0.5 DR.4, Discord)');
+{
+  // tangentsoft's model (2026-10-14): a box, a circle on top pulled up into a post, its top offset inward, the inner face
+  // pushed in a little; then "push that innermost face down to meet the box level", by pointing at the box's top
+  const { Camera } = await import(path.join(APP, 'camera.js'));
+  const { sceneOf, TIPS } = await import(path.join(APP, 'infer.js'));
+  const { Tools } = await import(path.join(APP, 'tools.js'));
+  const model = new Model(); model.units = 'm';
+  const cam = new Camera(); cam.setSize(1000, 800);
+  let cache = null, tt = 0, ov = null;
+  const host = {
+    model, cam, path: [], sel: [], units: 'm', msgs: [],
+    scene() { if (!cache || cache.version !== host.model.version || cache.model !== host.model) { cache = sceneOf(host.model); cache.model = host.model; } return cache; },
+    setSel(x) { host.sel = x; }, overlay(o) { ov = o; }, tip() {}, vcb() {}, print(m) { host.msgs.push(m); }, changed() {},
+    openContext(p) { host.path = p; host.sel = []; }, closeContext() { host.path = host.path.slice(0, -1); },
+  };
+  const T = new Tools(host);
+  const at = (p) => cam.project(p);
+  const moveTo = (p) => { const q = at(p); T.move({ x: q[0], y: q[1] }); };
+  const clickAt = (p) => { moveTo(p); const q = at(p); T.click(q[0], q[1], { time: (tt += 1000) }); };
+  const d = () => model.root;
+  const upAt = (z) => [...d().faces].filter(([, f]) => close(faceNormal(d(), f)[2], 1, 1e-9) && close(d().verts.get(f.loops[0][0])[2], z, 1e-9)).map(([id, f]) => ({ id, f, area: faceArea(d(), f) }));
+  const flat = () => [...d().faces.values()].filter((f) => faceArea(d(), f) < 1e-9).length;
+  cam.eye = [2, -2, 9]; cam.target = [1, 1, 2]; cam.clip(20);
+  T.set('rect'); clickAt([0, 0, 0]); moveTo([2, 2, 0]); T.value('2m,2m');
+  T.set('push'); clickAt([1, 1, 0]); T.value('2');
+  T.set('circle'); clickAt([1, 1, 2]); moveTo([1.5, 1, 2]); T.value('0.5');
+  T.set('push'); clickAt([1, 1, 2]); moveTo([1, 1, 2.5]); T.value('1');
+  T.set('offset'); clickAt([1, 1, 3]); moveTo([1, 1.2, 3]); T.value('0.1');
+  const inner = upAt(3).find((x) => x.f.loops.length === 1), ring = upAt(3).find((x) => x.f.loops.length === 2);
+  const top0 = 0.5 * 24 * 0.5 * 0.5 * Math.sin(2 * Math.PI / 24);
+  ok(inner && ring && inner.area < top0 - 0.2 && close(inner.area + ring.area, top0, 1e-9), 'the post\'s top offset 0.1 inward: an inner face inside a ring');
+  model.change('recess', (m) => pushPull(m.root, inner.id, -0.3));
+  const v0 = solidInfo(d()).volume, ringA = ring.area, innerA = inner.area;
+  ok(upAt(2.7).length === 1, 'the inner face pushed in 0.3 (a recess in the post)');
+  // point at the box's top beside the post: the inner face lands level with it
+  T.set('push'); clickAt([1, 1, 2.7]);
+  moveTo([0.25, 0.25, 2]);
+  ok(ov && ov.tip === TIPS.face && ov.marker && ov.marker.kind === 'face', `pushing, the box's top under the cursor is marked "On face" (${ov && ov.tip})`);
+  clickAt([0.25, 0.25, 2]);
+  let s = solidInfo(d());
+  const low = upAt(2).filter((x) => x.f.loops.length === 1);
+  ok(low.length === 1 && close(low[0].area, innerA, 1e-9), 'the inner face is level with the box\'s top (z = 2 exactly)');
+  ok(s.closed && close(s.volume, v0 - 0.7 * innerA, 1e-9) && flat() === 0, `a closed solid, no zero-height sides left over (${s.volume.toFixed(6)} m³)`);
+  ok(close(s.volume, 8 + ringA, 1e-9), 'box + a tube of the ring\'s area, 1 m tall');
+  // a face at an angle says nothing about depth: the push follows the cursor; the face being pushed hides what is behind it
+  T.set('push'); clickAt([1, 1, 2]);
+  moveTo([1, 0, 1]);
+  ok(ov && ov.tip !== TIPS.face && !(ov.marker && ov.marker.kind === 'face'), 'the box\'s front (not parallel) is not a level to push to');
+  T.escape();
+  T.set('push'); clickAt([0.25, 0.25, 2]);
+  moveTo([0.25, 0.25, 2]);
+  ok(ov && ov.tip !== TIPS.face && close(Math.abs(T.tool.d || 0), 0, 1e-6), 'over the pushed face itself, the box\'s bottom behind it is not snapped to');
+  T.escape();
+  ok(close(solidInfo(d()).volume, s.volume, 1e-12), 'Esc leaves the model as it was');
+  // pull it back up, pointing at the ring around it (looking down the post): flush again, the sides gone, the faces as they were after Offset
+  cam.eye = [1.05, 0.9, 12]; cam.target = [1, 1, 2]; cam.clip(20);
+  T.set('push'); clickAt([1, 1, 2]);
+  moveTo([1, 1.45, 3]);
+  ok(ov && ov.marker && close(ov.marker.p[2], 3, 1e-9) && close(T.tool.d, 1, 1e-9), `pulling, the cursor on the ring (a narrow face: its corners snap first) sets the level (${ov && ov.marker && ov.marker.kind})`);
+  clickAt([1, 1.45, 3]);
+  s = solidInfo(d());
+  const back = upAt(3);
+  ok(s.closed && flat() === 0 && back.length === 2 && close(s.volume, 8 + (ringA + innerA), 1e-9), `flush with the ring again: closed, no zero-height sides, the ring and the inner face (${back.length} faces on top)`);
+  // typed distances are unchanged: a typed 0.5 goes 0.5 even with a face under the cursor
+  T.set('push'); clickAt([1, 1, 3]); moveTo([0.25, 0.25, 2]); T.value('0.5');
+  ok(upAt(2.5).length === 1, 'typed 0.5 while pointing at the box\'s top: pushed 0.5, not to the box');
+}
 section('language files (0.4 G)');
 {
   // error paths that once called t() under a local variable named t (they threw "t is not a function")

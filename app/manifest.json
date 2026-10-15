@@ -5,9 +5,23 @@
   ],
   "module": "modelcraft.js",
   "imports": {
-    "three": "/assets/vendor/three/0.186.1/three.module.js",
-    "manifold-3d": "/assets/vendor/manifold-3d/3.5.4/manifold.js"
+    "three": "/assets/vendor/three/current/three.module.js",
+    "manifold-3d": "/assets/vendor/manifold-3d/current/manifold.js",
+    "@noble/curves/": "/assets/vendor/noble-curves/current/",
+    "@noble/hashes/": "/assets/vendor/noble-hashes/current/",
+    "@noble/ciphers/": "/assets/vendor/noble-ciphers/current/",
+    "three-gpu-pathtracer": "/assets/vendor/three-gpu-pathtracer/current/index.module.js",
+    "three-mesh-bvh": "/assets/vendor/three-mesh-bvh/current/index.module.js",
+    "three/examples/jsm/postprocessing/Pass.js": "/assets/vendor/three-gpu-pathtracer/current/three-addons/Pass.js"
   },
-  "panels": ["move", "window"],
-  "accepts": ["handoff"]
+  "phone": true,
+  "panels": [
+    "move",
+    "window"
+  ],
+  "accepts": [
+    "handoff",
+    "live"
+  ],
+  "input": "input-modelcraft.js"
 }

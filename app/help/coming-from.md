@@ -43,9 +43,9 @@ If you have modeled in SketchUp, ModelCraft will feel familiar: the same idea of
 
 There is no Save that overwrites the file you opened, no Save As dialog with a name, no autosave and no backup file. {{ui:Save}} ({{key:Mod+S}}) downloads a fresh `.modelcraft` file every time, usually to your downloads folder. Save often, and rename or move the files yourself. See [Open, save, import and export](topic:files).
 
-### It cannot open .skp files
+### It imports .skp files, but does not save them
 
-ModelCraft does not read or write SketchUp files. Export from SketchUp as Collada (`.dae`), which keeps groups, components and colors, or as OBJ, and import that. To go back, export Collada from ModelCraft and import it in SketchUp.
+{{ui:Import}} reads SketchUp files with ModelCraft's own reader, in the page: groups, components, colors, textures on faces, tags and soft edges come across. See [File formats in detail](topic:formats#skp-files). ModelCraft cannot save `.skp`: to go back, export Collada from ModelCraft and import it in SketchUp.
 
 ### No right-click menu
 
@@ -55,9 +55,9 @@ Right-drag pans; a right-click does nothing. Commands you would find in the cont
 
 There is no Model Info or template choice. The unit picker is at the bottom right. A new model starts in feet and inches in the US and in millimeters elsewhere, from your browser's language setting. Decimals always take a period: `2.5m`, never `2,5m`, because the comma always separates values.
 
-### No paint bucket, no materials
+### Paint has its own materials
 
-There is no Paint Bucket (B) and no materials or textures in this build. Faces are one neutral color. Colors from imported Collada and glTF files are kept and exported again, but you cannot change them.
+{{ui:Paint}} ({{key:B}}) paints solid colors and the materials in the {{ui:Materials}} section: brick, siding, roofing, wood, stone and more, drawn by ModelCraft. You can't load your own image as a material yet; textures that come in with imported files are kept. See [Paint with colors and materials](topic:paint).
 
 ### Scale is uniform, without grips
 
@@ -87,7 +87,7 @@ Copying a group with {{ui:Move}} makes a second placement of the same group, so 
 
 On a trackpad, set {{ui:Settings}} › {{ui:ModelCraft}} › Scrolling to Trackpad: two fingers orbit, {{key:Shift}} and two fingers pan, a pinch zooms. See [Orbit, pan and zoom](topic:orbit-pan-zoom#on-a-trackpad).
 
-If your hands know Blender's keys rather than SketchUp's, set Controls to Blender style: {{key:G}}, {{key:R}} and {{key:S}} act on the selection at once, {{key:E}} extrudes (push/pull), {{key:Shift+D}} duplicates. See [ModelCraft settings](topic:settings).
+If your hands know Blender's keys rather than SketchUp's, pick the {{ui:Modeler}} menu style: {{key:G}}, {{key:R}} and {{key:S}} act on the selection at once, {{key:E}} extrudes (push/pull), {{key:Shift+D}} duplicates, and a header menu bar (File, Edit, View, Select, Add, Object, Mesh) replaces the toolbar. Coming from SketchUp, the {{ui:Push-pull}} style gives a menu bar like its own over the same tool letters. See [Menus, keys and mouse](topic:menus-keys-and-mouse).
 
 ### Solids pushed into each other do not cut
 
@@ -95,7 +95,7 @@ Push/pull cuts through the face behind it in the same object, but two separate s
 
 ### What is missing
 
-Follow Me, Offset, Arc, Freehand, Text, angle and radius dimensions, Protractor guides, Tags (layers), Hide, Section Planes, Soften/Smooth, Intersect, Solid Tools, Paint, a component library, extensions, and printing or a layout tool for sheets are not in this build. [Not built yet](topic:not-built-yet) lists what to do instead.
+Freehand, Trim, Split and Outer Shell, your own image materials, extensions, and a layout tool for sheets are not in this build. [Not built yet](topic:not-built-yet) lists what to do instead.
 
 ## Shortcuts the browser keeps
 

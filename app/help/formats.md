@@ -3,7 +3,7 @@ title: File formats in detail
 summary: Exactly what each format ModelCraft opens, imports and exports keeps, converts and leaves out.
 section: reference
 order: 50
-keywords: formats, file types, modelcraft, json, collada, dae, obj, gltf, glb, stl, ifc, dwg, dxf, units, axes, y up, z up, millimeters, limits
+keywords: formats, file types, modelcraft, json, skp, collada, dae, obj, gltf, glb, stl, 3mf, ifc, dwg, dxf, units, axes, y up, z up, millimeters, limits
 ---
 
 ModelCraft's model is in meters with Z (blue) up. Every format below is converted to or from that.
@@ -14,7 +14,7 @@ ModelCraft's model is in meters with Z (blue) up. Every format below is converte
 |---|---|
 | Open | {{ui:Open}} ({{key:Mod+O}}) or drop on the view. Files ending in `.json` are accepted too |
 | Save | {{ui:Save}} ({{key:Mod+S}}), as a download |
-| Keeps | Everything: geometry, faces and their colors, soft edges, groups, components, names, guides, scenes, the units, and the last camera and style |
+| Keeps | Everything: geometry, faces and their colors, materials and imported textures, lamps, soft edges, groups, components, names, guides, scenes, the units, and the last camera and style |
 | Leaves out | The undo history |
 | Limit | 200 MB |
 
@@ -40,12 +40,18 @@ Import and export.
 ## glTF (.glb, .gltf)
 
 - **Export** (`.glb` only): glTF 2.0 binary, meters, Y up. One mesh per definition, so components stay shared. Colors become materials. Faces joined by [soft edges](topic:soften) carry smooth normals. Loose edges are left out.
-- **Import:** `.glb`, or `.gltf` with its data inside the file. A `.gltf` that keeps its data in a separate `.bin` file is refused: "This glTF file keeps its data in a separate file (…). Export it as a single .glb and open that." Base colors become face colors; textures and extensions are not read.
+- **Import:** `.glb`, or `.gltf` with its data inside the file. A `.gltf` that keeps its data in a separate `.bin` file is refused: "This glTF file keeps its data in a separate file (…). Export it as a single .glb and open that." Base colors become face colors. A base color texture stored in the file (PNG, JPEG or WebP) comes in as a texture on its faces and is kept when you save. Other extensions are not read.
 - **Limit:** 2 million vertices.
 
 ## STL (.stl)
 
 Export only, for 3D printing. Binary STL, **millimeters** (printer software reads STL as millimeters), Z up. Triangles only: groups, colors and loose edges are left out. Export closed solids for a clean print.
+
+{{ui:Check for 3D printing (STL or 3MF)…}} checks the shape first and writes the selection, or everything shown. See [Get a model ready for 3D printing](topic:print-3d).
+
+## 3MF (.3mf)
+
+Export only, from {{ui:Check for 3D printing (STL or 3MF)…}}. 3MF core: one mesh in **millimeters**, Z up, with its colors as materials. Most slicers read it, and unlike STL it says its unit. Hidden things are left out. See [Get a model ready for 3D printing](topic:print-3d).
 
 ## DWG and DXF export (.dwg, .dxf)
 
@@ -77,6 +83,19 @@ Import as lines on the ground (hatches and 3D faces as faces); export as describ
 - **Limits:** coordinates more than 10,000 km from the origin, or more than 2 million line pieces, are refused.
 - **Saving DWG or DXF** is not built.
 
+## SKP files
+
+{{ui:Import}} (or drop the file on the view) reads SketchUp files with ModelCraft's own reader, in the page: nothing is uploaded, and it works offline whenever ModelCraft does. Tested with files from SketchUp 3, 6, 7, 2014, 2017, 2018, 2020, 2025 and 2026; other versions should open too, but have not been tried yet. The model comes in as one group named after the file. One {{key:Mod+Z}} takes it away again. Step by step: [Bring in an SKP model](topic:import-sketchup-files).
+
+- **Kept:** faces with their holes, groups (as groups) and components (as components, shared), their names and placements, colors, tags on groups and components, edges that are not part of a face, and soft and smooth edges, so curved surfaces stay smooth.
+- **Colors:** a face's own material gives its color. A material painted on a group or component becomes that placement's paint, so faces inside with no color of their own take it, as in SketchUp; a component painted two colors stays one component.
+- **Tags** on groups and components become ModelCraft tags, shown or hidden as they were. Tags on loose faces and edges are not kept (ModelCraft tags groups and components only); the status bar counts them.
+- **Hidden things come in hidden** (faces, edges, groups, components, and faces and edges on a hidden tag), so you see what SketchUp showed; {{ui:Unhide all}} shows them.
+- **Textures:** a face painted with a textured material keeps its texture, placed as in the file, and the ModelCraft file keeps the image. A texture on a whole group or component, a texture missing from the file, or an image browsers can't show (such as a Photoshop file) keeps only its material's color.
+- **Left out, and counted in the status bar:** images placed in the model. Text, dimensions, guides, section planes, scenes and styles are not read.
+- **Units:** SketchUp files are in inches inside; ModelCraft converts them, so sizes come out right in any unit.
+- **Saving `.skp`** is not built. To take a model back to SketchUp, export Collada (`.dae`).
+
 ## Not supported
 
-ModelCraft cannot open or save SketchUp (`.skp`), 3DS, FBX, Rhino, STEP or IFC files. To bring in a model from SketchUp, export it from there as Collada (`.dae`) if your version can, or as OBJ.
+ModelCraft cannot open or save 3DS, FBX, Rhino, STEP or IFC files, or save SketchUp (`.skp`) files.

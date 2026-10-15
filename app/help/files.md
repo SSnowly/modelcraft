@@ -3,7 +3,7 @@ title: Open, save, import and export
 summary: The ModelCraft file, what you can bring in and send out, where files go, and what changes offline and between browsers.
 section: start
 order: 30
-keywords: open, save, import, export, file, recover, autosave, recent, desktop, open in 3d, handoff, download, modelcraft file, dae, collada, obj, gltf, glb, stl, ifc, dwg, dxf, formats, offline, save as
+keywords: open, save, import, export, file, skp, recover, autosave, recent, desktop, open in 3d, handoff, download, modelcraft file, dae, collada, obj, gltf, glb, stl, ifc, dwg, dxf, formats, offline, save as
 ---
 
 ModelCraft reads and writes files on your computer. Nothing is uploaded: a file you open is read inside your browser, and a file you save is a download. See [Where your files go](common:your-files).
@@ -13,10 +13,12 @@ ModelCraft reads and writes files on your computer. Nothing is uploaded: a file 
 | Format | Open | Import | Export | What it is for |
 |---|---|---|---|---|
 | ModelCraft (`.modelcraft`) | yes | no | {{ui:Save}} | Your working file. Keeps everything. |
+| SketchUp (`.skp`) | no | yes | no | Bringing in models from SketchUp. Keeps groups, components, colors, textures on faces, tags and soft edges. See [Bring in an SKP model](topic:import-sketchup-files). |
 | Collada (`.dae`) | no | yes | yes | Trading models with other 3D modelers. Keeps groups, components and colors. |
 | OBJ (`.obj`) | no | yes | yes | Rendering and visualization programs. |
 | glTF (`.glb`, `.gltf`) | no | yes | `.glb` only | Web viewers, game engines, AR. |
 | STL (`.stl`) | no | no | yes | 3D printing (in millimeters). |
+| 3MF (`.3mf`) | no | no | yes | 3D printing, with colors (in millimeters). From {{ui:Check for 3D printing (STL or 3MF)…}}: see [Get a model ready for 3D printing](topic:print-3d). |
 | IFC (`.ifc`) | no | no | yes | BIM programs, and BimCraft. |
 | DWG (`.dwg`) | no | yes | yes | A site plan or floor plan to model on; sending the model to a CAD program. |
 | DXF (`.dxf`) | no | yes | yes | The same, for any CAD program. |

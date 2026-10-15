@@ -32,7 +32,7 @@ The toolbar is split into labeled groups. Hover a button to see its name and key
 | Edit | {{ui:Undo}} ({{key:Mod+Z}}), {{ui:Redo}} ({{key:Mod+Y}}), {{ui:Copy}} ({{key:Mod+C}}), {{ui:Paste}} ({{key:Mod+V}}), {{ui:More}} (a menu: cut, copy, paste, paste in place {{key:Mod+Shift+V}}, duplicate {{key:Mod+D}}, delete, select all, select none, and the key style) |
 | Camera | {{ui:Orbit}} ({{key:O}}), {{ui:Pan}} ({{key:H}}), {{ui:Zoom}} ({{key:Z}}), {{ui:Extents}} ({{key:Shift+Z}}), {{ui:Views}} (a menu) |
 
-The keys shown are the SketchUp-style ones; with Blender style picked in [ModelCraft settings](topic:settings), the tooltips show those keys instead. The tool you are using is shown pressed. On a narrow screen the toolbar scrolls sideways.
+The keys shown are the push-pull ones; with the Modeler style picked in [ModelCraft settings](topic:settings), the tooltips show those keys instead. The tool you are using is shown pressed. On a narrow screen the toolbar scrolls sideways.
 
 The {{ui:Views}} menu has {{ui:Iso}}, {{ui:Top}}, {{ui:Front}}, {{ui:Right}}, {{ui:Back}}, {{ui:Left}} and {{ui:Bottom}}, each fitted to the model, and {{ui:Perspective}}, which switches between perspective and parallel projection.
 
@@ -84,7 +84,7 @@ Along the bottom, from left to right:
 1. **The tip**: what the tool wants next, or what the pointer is snapping to ("Endpoint", "On red axis").
 2. **Messages**: what just happened ("Undid push/pull.", "Imported site.dxf: 1697 edges on the ground, in a group.") or why something did not work.
 3. **The value box**: its label changes with the tool ({{ui:Length}}, {{ui:Dimensions}}, {{ui:Radius}}, {{ui:Sides}}, {{ui:Distance}}, {{ui:Angle}}, {{ui:Scale}}, {{ui:Offset}}). It shows the live size while you work, and takes what you type. See [Type exact sizes in the value box](topic:value-box).
-4. **The key style**: {{ui:Keys: SketchUp}} or {{ui:Keys: Blender}} switches the keyboard shortcuts and mouse buttons at once (the same as in [ModelCraft settings](topic:settings)).
+4. **The key style**: {{ui:Keys: Push-pull}} or {{ui:Keys: Modeler}} switches the keyboard shortcuts and mouse buttons at once (the same as in [ModelCraft settings](topic:settings)).
 5. **{{ui:Snap}} and {{ui:Collide}}**: snapping to points, edges and axes, and solids stopping where they touch. Crossed out = off. Click to switch. See [ModelCraft settings](topic:settings).
 6. **The units picker**: the unit lengths are shown in. See [Get started](topic:getting-started#check-the-units-first).
 

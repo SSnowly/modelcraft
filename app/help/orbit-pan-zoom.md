@@ -66,16 +66,18 @@ With Mouse wheel, two-finger scrolling zooms; it does not pan. That is the oppos
 
 :::touch
 - **One finger** uses the current tool: **tap** to click, **press and drag** to draw or drag.
-- **Hold still** for half a second to finish what the tool is doing, as {{key:Enter}} does: a curve, a line chain.
-- **Two fingers** dragged together **orbit**; **pinch** to zoom. Both work in one gesture.
-- **Three fingers** dragged together **pan**.
+- While a drawing tool's finger is down, a **loupe** above it shows what is under the finger, so you can see the endpoint, midpoint or edge it snaps to before you lift.
+- **Hold still** for half a second to finish what the tool is doing, as {{key:Enter}} does: a curve, a line chain. With nothing going on, holding still and then dragging the same finger **orbits** until you lift it.
+- **Two fingers** dragged together **pan**; **pinch** to zoom. Both work in one gesture.
+- **Three fingers** dragged together **orbit**.
+- To swap them (two fingers orbit, three pan), open {{ui:Settings}}, {{ui:ModelCraft}} tab, Touch screen.
 - Putting a second finger down **cancels** what the first finger started (a rectangle half drawn, a push/pull in progress). Lift your fingers and start again.
 - A small bar at the bottom of the view has **Done** ({{key:Enter}}), **Cancel** ({{key:Esc}}) and **Undo**, for when there is no keyboard.
 - Snapping and picking reach a little further than with a mouse, and the buttons are bigger, so a finger can hit them.
 :::
 
 :::mouse
-On a touch screen, one finger uses the current tool (tap to click, hold still to finish), two fingers orbit and pinch to zoom, three fingers pan, and a small bar offers Done, Cancel and Undo.
+On a touch screen, one finger uses the current tool (tap to click, hold still to finish, or hold still and drag to orbit), two fingers pan and pinch to zoom, three fingers orbit, and a small bar offers Done, Cancel and Undo.
 :::
 
 ## Standard views

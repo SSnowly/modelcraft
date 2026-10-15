@@ -11,7 +11,8 @@
  *                                           its own inside it (parts may touch or overlap without merging faces), in
  *                                           meters, standing on z = 0 (or lying on it, for wall things).
  */
-import { addPolygon, pushPull, rectPts, ngonPts, paintFaces, meshDef } from './model.js';
+import { addPolygon, pushPull, rectPts, ngonPts, paintFaces, meshDef, softenEdges } from './model.js';
+import { entourage } from './entourage.js';   // 0.5 RC.11 (e): a byte-identical copy of lib/entourage/entourage.js
 import { ident } from './vec.js';
 import { t } from './i18n.js';
 
@@ -87,6 +88,25 @@ const MAKE = {
   car: (m, c) => { box(m, c, 'Body', [0, 0, 0.3], [4.3, 1.8, 0.6], GRAY); box(m, c, 'Cabin', [1.1, 0.1, 0.9], [2.2, 1.6, 0.55], GLASS); for (const [x, y] of [[0.8, -0.01], [3.5, -0.01], [0.8, 1.61], [3.5, 1.61]]) { const d = m.newDef('group', part('Wheel')); addPolygon(d, ngonPts([0, 0, 0], [0, 1, 0], [1, 0, 0], 0.33, 16)); pushPull(d, [...d.faces.keys()][0], 0.2); paintFaces(d, [...d.faces.keys()], DARK); m.place(c, d.id, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0.33, 1]); } },
 };
 
+// ---- entourage (0.5 RC.11 (e)): trees, shrubs, people and cars from lib/entourage (CC0), each part a group in its own
+// colour (a car's see-through glass painted with the library's tinted glass), organic parts softened so they read as
+// surfaces, not wireframes. Millimetres in the generator → meters here. ----
+const ENTOURAGE = entourage();
+for (const e of ENTOURAGE) {
+  MAKE['ent-' + e.slug] = (m, c) => {
+    for (const p of e.parts) {
+      const polys = [], color = p.alpha < 1 ? 'mat:glass-tinted' : p.color;
+      for (let i = 0; i < p.I.length; i += 3) {
+        const v = (k) => [p.P[p.I[i + k] * 3] / 1000, p.P[p.I[i + k] * 3 + 1] / 1000, p.P[p.I[i + k] * 3 + 2] / 1000];
+        polys.push({ loops: [[v(0), v(1), v(2)]], color });
+      }
+      const d = meshDef(m, polys, part(p.name), 'group');
+      softenEdges(d, [...d.edges.keys()], e.cat === 'site/vehicles' ? 25 : 75);
+      m.place(c, d.id, ident());
+    }
+  };
+}
+
 export const STARTER = [
   ['door', 'openings', true], ['door2', 'openings', true], ['window', 'openings', true], ['window_wide', 'openings', true], ['garage', 'openings', true],
   ['table', 'furniture'], ['round_table', 'furniture'], ['chair', 'furniture'], ['stool', 'furniture'], ['sofa', 'furniture'], ['armchair', 'furniture'],
@@ -95,6 +115,7 @@ export const STARTER = [
   ['toilet', 'kitchen'], ['bathtub', 'kitchen'], ['shower', 'kitchen'], ['washbasin', 'kitchen'],
   ['stair', 'building'], ['column_round', 'building'], ['column_square', 'building'], ['beam', 'building'],
   ['tree', 'site'], ['shrub', 'site'], ['person', 'site'], ['car', 'site'],
+  ...ENTOURAGE.map((e) => ['ent-' + e.slug, 'entourage']),
 ].map(([id, cat, wall]) => ({ id, cat, ...(wall ? { wall: true } : {}) }));
 
 export function buildStarter(model, id, name) {

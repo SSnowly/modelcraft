@@ -36,14 +36,15 @@ ModelCraft is an early build. This page lists what it does not do yet, so you do
 
 | Not yet | Instead, today |
 |---|---|
-| Textures, image materials and transparency | [Paint with solid colors](topic:paint); colors in imported Collada and glTF files are kept and exported again |
-| Textures in glTF and Collada | They are counted and left out on import |
+| Your own image textures, or changing a library material's size or color | [Paint with the material library](topic:paint#paint-with-a-material) or a solid color |
+| Textures in exported files | Exports get each material's color and name |
+| Textures in Collada files | They are counted and left out on import; textures in `.skp` and `.glb` files come in |
 
 ## Files
 
 | Not yet | Instead, today |
 |---|---|
-| Opening or saving SketchUp files | Export Collada (`.dae`) or OBJ from SketchUp, and import that |
+| Saving SketchUp files, and text and dimensions from them | [Import](topic:import-sketchup-files) keeps faces, colors and textures; export Collada (`.dae`) to go back to SketchUp |
 | Dimensions and guides in DWG and DXF exports | Add them in the CAD program after exporting |
 | Points, tables, multileaders, regions and 3D solids from DWG and DXF | They are counted and left out; text comes in as single-stroke lettering, not the drawing's font |
 | 3D solids, surfaces, regions, meshes, tables and multileaders from DWG and DXF | They are counted and left out too. Export the 3D parts from the CAD program as OBJ or Collada and import that |
@@ -61,6 +62,6 @@ Undo keeps a full copy of the model for each step, so very large imports make ev
 
 ## Apps and platforms
 
-- **Desktop builds** of ModelCraft are not available yet. It runs in the browser on Mac, Windows and Linux.
+- **Desktop:** ModelCraft runs in the browser on Mac, Windows and Linux, and in CadCraft Studio, the desktop app with all eight apps in one install. iPad, Android and iPhone come with 0.6.
 - **Touch:** see [Orbit, pan and zoom](topic:orbit-pan-zoom) for the finger gestures. Pressure and pen tilt are not used.
 - **Sheets:** ModelCraft [prints one view per page](topic:export-model#print-the-view-or-save-it-as-a-pdf); there are no sheet layouts with several views or a title block. Export to CadCraft-friendly DWG/DXF for drawings to scale.

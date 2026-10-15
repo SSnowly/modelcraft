@@ -20,11 +20,16 @@
     },
     "vendor": {
         "manifold-3d": "3.5.4",
-        "three": "0.186.1"
+        "noble-ciphers": "2.4.0",
+        "noble-curves": "2.4.0",
+        "noble-hashes": "2.4.0",
+        "three": "0.186.1",
+        "three-gpu-pathtracer": "0.0.26",
+        "three-mesh-bvh": "0.9.15"
     },
     "origin": "https://getcadcraft.com",
     "packed": {
-        "at": "2026-10-13T20:37:19Z",
-        "build": "0.4"
+        "at": "2026-10-15T10:30:28Z",
+        "build": "dev"
     }
 }

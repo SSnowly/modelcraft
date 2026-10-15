@@ -45,7 +45,7 @@ To move a whole object without stretching it, select all of it first (triple-cli
 - {{key:Mod+C}} copies the selection, {{key:Mod+X}} cuts it (copies, then erases), {{ui:Copy}} and {{ui:Paste}} are also buttons in the toolbar's {{ui:Edit}} group, and {{ui:More}} beside them has cut, paste in place and duplicate.
 - {{key:Mod+V}} pastes: an outline of the copy follows the pointer, snapping like any tool, and a click puts it down with its lowest corner there. {{key:Esc}} cancels.
 - {{key:Mod+Shift+V}} pastes in place, exactly where the copy came from — useful for moving something into a group you have opened.
-- {{key:Mod+D}} ({{key:Shift+D}} in Blender style) duplicates: a copy is made and moves with the pointer at once; click to put it down, type a distance, or press {{key:Esc}} to drop it. Right after, type `3x` for more copies in a row.
+- {{key:Mod+D}} ({{key:Shift+D}} in the Modeler style) duplicates: a copy is made and moves with the pointer at once; click to put it down, type a distance, or press {{key:Esc}} to drop it. Right after, type `3x` for more copies in a row.
 
 A pasted group becomes a new group. A pasted component is another placement of the same component, so editing one still changes them all. Copies also paste into another ModelCraft tab in this browser (they come in as new definitions there).
 

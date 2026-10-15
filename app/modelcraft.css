@@ -154,6 +154,8 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-over:focus { outline: none; }
 .mc-over:focus-visible { outline: var(--pen-2) solid var(--action); outline-offset: -3px; }
 .mc-over.is-orbit { cursor: grab; }
+/* touch: the loupe above a drawing finger (modelcraft.js) */
+.mc-loupe { position: absolute; z-index: 5; border-radius: 50%; pointer-events: none; border: var(--pen-2) solid var(--ink); }
 .mc-over.is-select { cursor: default; }
 .mc-hint {
   position: absolute; z-index: 2; top: 1rem; left: 1rem; max-width: min(31rem, calc(100% - 2rem));
@@ -193,6 +195,9 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-toggle { flex: 0 0 auto; padding: .1rem .5rem; font: inherit; color: var(--ink-2); background: transparent; border: var(--pen-1) solid var(--line); border-radius: var(--radius); text-decoration: line-through; }
 .mc-toggle[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); text-decoration: none; font-weight: 600; }
 .mc-toggle:hover { border-color: var(--ink); }
+/* the value field's keyboard switch (touch): numbers unless pressed; never struck through like an off toggle */
+.mc-vcb-kbd { text-decoration: none; color: var(--ink); }
+.mc-vcb-kbd[hidden] { display: none; }
 /* Settings › ModelCraft (settings.inc lives in the shell's dialog) */
 .mc-set-seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
@@ -227,6 +232,10 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-swatch:focus-visible { outline: var(--pen-3) solid var(--action); outline-offset: 2px; }
 .mc-swatch { overflow: hidden; }
 .mc-swatch.is-default { background: var(--sheet); }
+/* Materials (0.5 RC.7): texture swatches drawn on idle, a small heading per category */
+.mc-swatch.is-mat { background-size: cover; background-position: center; image-rendering: auto; }
+.mc-matcat { margin: .5rem 0 .25rem; font-size: var(--fs-sm); color: var(--ink-2); }
+.mc-matlib .mc-matcat:first-child { margin-top: 0; }
 .mc-swatch.is-default::after { content: ''; position: absolute; left: 50%; top: -20%; height: 140%; border-left: var(--pen-1) solid var(--ink-2); transform: rotate(45deg); }
 .mc-swatch input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
 .mc-swatch.is-custom { background: var(--sheet); }
@@ -241,3 +250,16 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc.is-touch .mc-swatch { min-height: 2.25rem; }
 .mc-touchbar { position: absolute; left: 50%; bottom: .75rem; transform: translateX(-50%); display: flex; gap: .25rem; padding: .25rem; background: var(--sheet); border: var(--pen-1) solid var(--line); border-radius: var(--radius); z-index: 3; }
 .mc-touchbar[hidden] { display: none; }
+
+/* ---- Check for 3D printing (0.5 SG.4) ---- */
+.mc-print p, .mc-print ul { margin: 0 0 .6rem; }
+.mc-print ul { padding-left: 1.1rem; }
+.mc-print-verdict { font-weight: 700; }
+.mc-print-verdict[data-print-ok="1"] { color: var(--layer-green); }
+.mc-print-verdict[data-print-ok="0"], .mc-print-problems { color: var(--layer-red); }
+.mc-print-facts { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* Lights (0.5 RC.11 (d)) */
+.mc-lights-add { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: .5rem; }
+.mc-lights li { display: flex; align-items: center; gap: .35rem; }
+.mc-lights li.is-sel .mc-linkbtn { font-weight: 700; }
+.mc-light-presets { display: flex; flex-wrap: wrap; gap: .25rem; }

@@ -26,7 +26,7 @@ Select what you want to keep in view, then {{ui:Edit}} › {{ui:More}} › {{ui:
 The {{ui:Outliner}} shows hidden groups and components in italics, with a crossed-out eye; click the eye to show one again.
 
 :::note
-With Blender-style keys, {{key:H}} hides, {{key:Shift+H}} isolates and {{key:Alt+H}} unhides all. ({{ui:Settings}} › {{ui:ModelCraft}} chooses the key style.)
+With Modeler keys, {{key:H}} hides, {{key:Shift+H}} isolates and {{key:Alt+H}} unhides all. ({{ui:Settings}} › {{ui:ModelCraft}} chooses the key style.)
 :::
 
 ## Things to know
