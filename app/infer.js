@@ -36,11 +36,10 @@ export function sceneOf(model) {
   // the active section cut (0.4 M7): what lies on the side it cuts away cannot be snapped to or picked either
   const cut = model.activeCut ? model.activeCut() : null;
   const keep = cut ? (p) => dot(sub(p, cut.p), cut.n) <= 1e-9 : null;
-  const since = model.unsafeVersion ?? model.version;
   const insts = [];
   // hidden things (0.4 M17) are left out: they cannot be snapped to, picked or window-selected
   (model.walkShown ? model.walkShown.bind(model) : model.walk.bind(model))((def, m, path) => {
-    const L = localOf(def, since);
+    const L = localOf(def, model);
     if (L.faces.length || L.edges.length) insts.push(new Placed(def, m, path, L, keep));
   });
   return new Scene(insts, model.guides, model.version, keep);
@@ -51,23 +50,24 @@ export function sceneOf(model) {
  * first hover over a big model does not wait for them. → true when every one is ready.
  */
 export function warmScene(model, more) {
-  const since = model.unsafeVersion ?? model.version, seen = new Set();
+  const seen = new Set();
   let done = true;
   (model.walkShown ? model.walkShown.bind(model) : model.walk.bind(model))((def) => {
     if (seen.has(def)) return false;
     seen.add(def);
-    const L = local.get(def);
-    if (L && L.ver >= since) return;
+    if (fresh(model, def, local.get(def))) return;
     if (!more()) { done = false; return false; }
-    localOf(def, since);
+    localOf(def, model);
   });
   return done;
 }
 
 const local = new WeakMap();   // definition object → its faces and edges in its own space, with trees
-function localOf(def, since) {
+// still right for this definition object (model.kept: not edited in place since; a model without it: same version)
+const fresh = (model, def, L) => !!L && (model.kept ? model.kept(def, L) : L.v === model.version);
+function localOf(def, model) {
   let L = local.get(def);
-  if (L && L.ver >= since) return L;
+  if (fresh(model, def, L)) return L;
   const faces = [], edges = [];
   let nt = 0;
   for (const [id, f] of def.faces) {
@@ -85,7 +85,14 @@ function localOf(def, since) {
     const x = tri[i * 9 + a], y = tri[i * 9 + 3 + a], z = tri[i * 9 + 6 + a];
     tb[i * 6 + a] = Math.min(x, y, z); tb[i * 6 + 3 + a] = Math.max(x, y, z);
   }
-  L = { ver: since, faces, edges, tri, triFace, ftree: new BoxTree(tb), etree: new BoxTree(boxesOf(edges.length, (i) => [edges[i].a, edges[i].b])) };
+  // the points its faces and edges use, each once (a placement's box)
+  const used = new Set();
+  for (const f of faces) for (const t of f.tris) for (const p of t) used.add(p);
+  for (const e of edges) { used.add(e.a); used.add(e.b); }
+  const pts = new Float64Array(used.size * 3);
+  k = 0;
+  for (const p of used) { pts[k++] = p[0]; pts[k++] = p[1]; pts[k++] = p[2]; }
+  L = { ...(model.stamp ? model.stamp(def) : { v: model.version }), faces, edges, tri, triFace, pts, ftree: new BoxTree(tb), etree: new BoxTree(boxesOf(edges.length, (i) => [edges[i].a, edges[i].b])) };
   local.set(def, L);
   return L;
 }
@@ -417,6 +424,7 @@ export function pickWindow(sc, cam, rect, crossing, { path = [] } = {}) {
   const vp = cam.viewProj();
   const x0 = Math.min(rect.x0, rect.x1), x1 = Math.max(rect.x0, rect.x1), y0 = Math.min(rect.y0, rect.y1), y1 = Math.max(rect.y0, rect.y1);
   const inside = (s) => s && s[0] >= x0 && s[0] <= x1 && s[1] >= y0 && s[1] <= y1;
+  if (sc.insts && !sc.keep) return pickWindowTrees(sc, cam, vp, x0, y0, x1, y1, inside, crossing, path);
   const segIn = (a, b) => {
     const A = cam.project(a, vp), B = cam.project(b, vp);
     if (!A || !B) return false;
@@ -455,6 +463,77 @@ export function pickWindow(sc, cam, rect, crossing, { path = [] } = {}) {
     items.set(sel.t + sel.id, it);
   }
   return [...items.values()].filter((it) => (crossing ? it.any : it.all)).map((it) => it.sel);
+}
+
+/**
+ * pickWindow on a scene of placements: the same answers, found through each definition's trees. A box (a tree node, an
+ * item, a placement) wholly inside the rectangle on screen is in; one wholly beside it, out; only what straddles the
+ * rectangle's sides is measured item by item. A placement below the open context is one item (its top placement).
+ */
+function pickWindowTrees(sc, cam, vp, x0, y0, x1, y1, inside, crossing, path) {
+  const proj = (m, p) => cam.project(apply(m, p), vp);
+  const segIn = (A, B) => (A && B ? (crossing ? segRect(A, B, x0, y0, x1, y1) : inside(A) && inside(B)) : false);
+  // where a box (own space, under m) lands: 1 wholly inside, -1 wholly beside (and in front of the eye), 0 across a side
+  const where = (m, lo, hi) => {
+    let all = true, behind = false, sx0 = Infinity, sy0 = Infinity, sx1 = -Infinity, sy1 = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const s = proj(m, [i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]);
+      if (!s) { behind = true; all = false; continue; }
+      if (!inside(s)) all = false;
+      if (s[0] < sx0) sx0 = s[0]; if (s[0] > sx1) sx1 = s[0]; if (s[1] < sy0) sy0 = s[1]; if (s[1] > sy1) sy1 = s[1];
+    }
+    if (all) return 1;
+    return !behind && (sx1 < x0 || sx0 > x1 || sy1 < y0 || sy0 > y1) ? -1 : 0;
+  };
+  // a face: all its triangles' sides in (window), or any side across, or the rectangle's centre inside it (crossing)
+  const c = [(x0 + x1) / 2, (y0 + y1) / 2];
+  const faceHit = (m, lf) => {
+    let all = true, any = false;
+    for (const [a, b, d] of lf.tris) {
+      const A = proj(m, a), B = proj(m, b), D = proj(m, d);
+      for (const [p, q] of [[A, B], [B, D], [D, A]]) { const o = segIn(p, q); all = all && o; any = any || o; }
+      if (crossing && !any && A && B && D && inTri2(c, A, B, D)) any = true;
+    }
+    return crossing ? any : all;
+  };
+  const edgeHit = (m, le) => segIn(proj(m, le.a), proj(m, le.b));
+  const boxOf = (t) => (t.min ? [t.min, t.max] : null);
+  const out = new Map();
+  for (const P of sc.insts) {
+    if (!startsWith(P.path, path)) continue;
+    const { m, L } = P;
+    if (P.path.length > path.length) {
+      // below the open context: the top placement is picked when all of it is in (window) or any of it is (crossing)
+      const sel = { t: 'i', id: P.path[path.length] }, key = 'i' + sel.id;
+      const it = out.get(key) || { sel, all: true, any: false };
+      out.set(key, it);
+      if (crossing ? it.any : !it.all) continue;   // already decided
+      const boxes = [boxOf(L.ftree), boxOf(L.etree)].filter(Boolean);
+      const lo = [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b[0][k]))), hi = [0, 1, 2].map((k) => Math.max(...boxes.map((b) => b[1][k])));
+      const w = where(m, lo, hi);
+      if (w === 1) { it.any = true; continue; }
+      if (w === -1) { it.all = false; continue; }
+      if (crossing) {
+        const test = (a, b) => where(m, a, b) !== -1;
+        it.any = !!(L.etree.walk(test, (i) => edgeHit(m, L.edges[i])) || L.ftree.walk(test, (i) => faceHit(m, L.faces[L.triFace[i]])));   // the face tree holds triangles
+      } else {
+        const T = L.pts;
+        for (let i = 0; i < T.length && it.all; i += 3) if (!inside(proj(m, [T[i], T[i + 1], T[i + 2]]))) it.all = false;
+      }
+      continue;
+    }
+    // the open context's own faces and edges, each its own item (soft edges are not picked)
+    const test = (a, b) => where(m, a, b) !== -1;
+    L.etree.walk(test, (i) => {
+      const le = L.edges[i];
+      if (!le.soft && edgeHit(m, le)) out.set('e' + le.id, { sel: { t: 'e', id: le.id }, all: true, any: true });
+    });
+    L.ftree.walk(test, (i) => {
+      const lf = L.faces[L.triFace[i]], key = 'f' + lf.id;
+      if (!out.has(key) && faceHit(m, lf)) out.set(key, { sel: { t: 'f', id: lf.id }, all: true, any: true });
+    });
+  }
+  return [...out.values()].filter((it) => (crossing ? it.any : it.all)).map((it) => it.sel);
 }
 
 function inTri2(p, a, b, c) {

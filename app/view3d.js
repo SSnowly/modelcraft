@@ -105,8 +105,8 @@ export class View3D {
   geometryOf(def, dflt = null) {
     const key = def.id + '|' + (dflt || '');
     let g = this.cache.get(key);
-    // still right while it is the same definition object and nothing has edited one in place since (model.unsafeVersion)
-    if (g && g.def === def && g.version >= (this.model.unsafeVersion ?? this.model.version)) return g;
+    // still right while it is the same definition object and it has not been edited in place since (model.kept)
+    if (g && g.def === def && (this.model.kept ? this.model.kept(def, g) : g.v === this.model.version)) return g;
     if (g) { g.faces?.dispose(); g.edges?.dispose(); for (const x of g.mats || []) x.geometry.dispose(); }
     const plain = [];   // [fid, normal, colour, triangles] of the faces drawn in colour
     let ni = 0;
@@ -175,7 +175,7 @@ export class View3D {
       mg.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       return { id: paint, geometry: mg };   // 'mat:<id>' | 'img:<id>'
     });
-    g = { def, version: this.model.version, faces, edges, mats, hasFaces: ni > 0 || mats.length > 0 };
+    g = { def, ...(this.model.stamp ? this.model.stamp(def) : { v: this.model.version }), faces, edges, mats, hasFaces: ni > 0 || mats.length > 0 };
     this.cache.set(key, g);
     return g;
   }
@@ -292,7 +292,9 @@ export class View3D {
     addDef(this.model.root, this.root, [], 0);
     this.bb = box;
     if (cut && solids.length) this.addCaps(solids, cut);
-    for (const id of [...this.cache.keys()]) if (!live.has(id)) this.dropCache(id);
+    // geometry not drawn now is kept while its definition is still in the model (hidden, or another colour of it): showing
+    // it again is then immediate. What was deleted or replaced goes.
+    for (const [id, g] of [...this.cache]) if (!live.has(id) && this.model.def(g.def.id) !== g.def) this.dropCache(id);
     this.root.updateMatrixWorld(true);
     this.buildExtras(u);
     this.updateLights();

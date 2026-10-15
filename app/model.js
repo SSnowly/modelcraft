@@ -35,6 +35,7 @@ import {
   frame, to2, rayTri, ident, mmul, translation, apply, applyDir, invert, det3, bboxAdd,
 } from './vec.js';
 import { earcut } from './earcut.js';
+import { BoxTree, boxesOf } from './bvh.js';
 import { t } from "./i18n.js";
 
 export const FORMAT = 'modelcraft';
@@ -56,6 +57,7 @@ export class Def {
     this.insts = new Map();
     this.splines = new Map();    // curve id → {pts: points clicked (def coordinates), closed, segs} (0.4 M27: editable curves)
     this.next = 1;
+    this.rev = 0;                // goes up when a scoped change edits it in place (Model.change's scope)
     this._ek = null;
   }
 }
@@ -223,6 +225,76 @@ export function vertexAt(def, p) {
     if (dist(add(A, mul(u, s)), p) <= EPS) { splitEdge(def, eid, id); break; }
   }
   return id;
+}
+
+/**
+ * vertexAt for many points in a row (exploding a big group): the same answers, found through a grid of def's vertices
+ * and trees of its edges instead of a pass over all of them for each point. `edgeAdded(id)` after each new edge. When an
+ * edge is split (a point on another edge: rare), or after `stop()`, it falls back to vertexAt itself.
+ */
+function vertexIndex(def) {
+  let slow = false, seq = 0;
+  const cell = (x) => Math.floor(x / EPS);
+  const vgrid = new Map(), vorder = new Map();
+  const putV = (id, p) => {
+    vorder.set(id, seq++);
+    const k = cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]);
+    let l = vgrid.get(k);
+    if (!l) vgrid.set(k, (l = []));
+    l.push(id);
+  };
+  for (const [id, p] of def.verts) putV(id, p);
+  // the edges there now (a tree, in their order) and the ones added since (a list: they are checked after, in order)
+  const old = [...def.edges.keys()], eorder = new Map(old.map((id, i) => [id, i]));
+  const tree = new BoxTree(boxesOf(old.length, (i) => { const e = def.edges.get(old[i]); return [def.verts.get(e.a), def.verts.get(e.b)]; }, EPS));
+  const added = [], addedGrid = new Map();
+  let G = 0;   // the new edges' grid: cells about as long as the first of them
+  const gk = (x, y, z) => x + ',' + y + ',' + z;
+  const onEdge = (eid, p) => {
+    const e = def.edges.get(eid);
+    if (!e) return false;
+    const A = def.verts.get(e.a), B = def.verts.get(e.b), u = sub(B, A), L2 = dot(u, u);
+    const s = dot(sub(p, A), u) / L2;
+    return s > 0 && s < 1 && dist(add(A, mul(u, s)), p) <= EPS;
+  };
+  return {
+    at(p) {
+      if (slow) return vertexAt(def, p);
+      let have = null, best = Infinity;
+      const cx = cell(p[0]), cy = cell(p[1]), cz = cell(p[2]);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++)
+        for (const id of vgrid.get(gk(cx + dx, cy + dy, cz + dz)) || []) if (vorder.get(id) < best && near(p, def.verts.get(id))) { have = id; best = vorder.get(id); }
+      if (have !== null) return have;
+      const id = vAdd(def, p);
+      putV(id, p);
+      // the first edge (in def's order) it lands inside: an old one from the tree, else a new one from the grid
+      let hit = null, ho = Infinity;
+      tree.box(p, p, (i) => { if (i < ho && onEdge(old[i], p)) { hit = old[i]; ho = i; } });
+      if (hit === null) {
+        let first = Infinity;
+        if (G) for (const j of addedGrid.get(gk(Math.floor(p[0] / G), Math.floor(p[1] / G), Math.floor(p[2] / G))) || []) if (j < first && onEdge(added[j], p)) first = j;
+        if (first < Infinity) hit = added[first];
+      }
+      if (hit !== null) { splitEdge(def, hit, id); slow = true; }
+      return id;
+    },
+    edgeAdded(eid) {
+      if (slow || eid === null || eorder.has(eid)) return;
+      eorder.set(eid, Infinity);
+      const e = def.edges.get(eid), A = def.verts.get(e.a), B = def.verts.get(e.b), j = added.length;
+      if (!G) G = Math.max(dist(A, B), 64 * EPS);
+      added.push(eid);
+      const lo = [0, 1, 2].map((k) => Math.floor((Math.min(A[k], B[k]) - EPS) / G)), hi = [0, 1, 2].map((k) => Math.floor((Math.max(A[k], B[k]) + EPS) / G));
+      if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 4096) { slow = true; return; }   // a very long edge: back to the plain way
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
+        const k = gk(x, y, z);
+        let l = addedGrid.get(k);
+        if (!l) addedGrid.set(k, (l = []));
+        l.push(j);
+      }
+    },
+    stop() { slow = true; },
+  };
 }
 
 /**
@@ -1742,13 +1814,20 @@ export class Model {
 
   // ---- undo ----
   /** Run fn(model) as one undo step labelled `label`. */
-  change(label, fn) {
+  /**
+   * Run fn(model) as one undo step labelled `label`. `scope`: the ids of the only definitions fn edits in place (new
+   * definitions it makes do not count; [] = none, as for guides or dimensions): what was built from every other
+   * definition is kept (the view's geometry, snapping's trees, undo's copies), so an edit to a big model costs what it
+   * touched. Without it, everything may have changed.
+   */
+  change(label, fn, scope = null) {
     const before = this.snap();
     let r;
     this._editing++;
     try { r = fn(this); } catch (e) { this._editing--; this.restore(before); throw e; }
     this._editing--;
-    this.version++;   // fn edited in place: nothing kept from before it is known to be right any more
+    if (scope) { for (const id of scope) { const d = this.defs.get(id); if (d) d.rev++; } this.bumpSafe(); }
+    else this.version++;   // fn edited in place: nothing kept from before it is known to be right any more
     const after = this.snap();
     if (!sameSnap(after, before)) {
       this.undoStack.push(new Step(label, before, after));
@@ -1828,7 +1907,7 @@ export class Model {
       if (!pv.ids.has(id) || pv.defs.has(id)) continue;
       const d = this.defs.get(id), c = defStrs.get(d);
       pv.defs.set(id, defToJSON(d));
-      if (c && c.v >= this.unsafeVersion) pv.strs.set(id, c.s);   // its copy as JSON is known already
+      if (this.kept(d, c)) pv.strs.set(id, c.s);   // its copy as JSON is known already
     }
     for (const [id, j] of pv.defs) this.defs.set(id, defOf(j));
     this.nextId = pv.nextId;
@@ -1872,20 +1951,25 @@ export class Model {
   get version() { return this._v; }
   set version(v) { this._v = v; this.unsafeVersion = v; }
   bumpSafe() { this._v++; }
+  /**
+   * What was made from definition object d (`e` = {v, rev}: stamp(d) when it was made) is still right: nothing has edited
+   * a definition in place unknown since (unsafeVersion), nor d itself in a scoped change (its rev).
+   */
+  kept(d, e) { return !!e && e.v >= this.unsafeVersion && e.rev === d.rev; }
+  stamp(d) { return { v: this._v, rev: d.rev }; }
   /** A definition as JSON, kept with the definition object until it may have been edited in place. */
   defString(d) {
     if (this._editing) return JSON.stringify(defToJSON(d));
     const c = defStrs.get(d);
-    if (c && c.v >= this.unsafeVersion) return c.s;
+    if (this.kept(d, c)) return c.s;
     const s = JSON.stringify(defToJSON(d));
-    defStrs.set(d, { v: this._v, s });
+    defStrs.set(d, { ...this.stamp(d), s });
     return s;
   }
   /** Make definitions' JSON ahead of time while `more()` (idle time left), so the next undo step is quick. → true when done. */
   warmSnap(more) {
     for (const d of this.defs.values()) {
-      const c = defStrs.get(d);
-      if (c && c.v >= this.unsafeVersion) continue;
+      if (this.kept(d, defStrs.get(d))) continue;
       if (this._editing || this._pv || !more()) return false;
       this.defString(d);
     }
@@ -1900,12 +1984,12 @@ export class Model {
     const defs = new Map(), made = [];
     for (const [id, str] of s.parts) {
       const cur = this.defs.get(id), c = cur && defStrs.get(cur);
-      if (c && c.s === str && c.v >= this.unsafeVersion) { defs.set(id, cur); continue; }
+      if (c && c.s === str && this.kept(cur, c)) { defs.set(id, cur); continue; }
       const d = defOf(JSON.parse(str));
       defs.set(id, d); made.push([d, str]);
     }
     this.load(JSON.parse(s.head), { keepHistory: true, defs });
-    for (const [d, str] of made) defStrs.set(d, { v: this._v, s: str });
+    for (const [d, str] of made) defStrs.set(d, { ...this.stamp(d), s: str });
   }
 
   // ---- instances ----
@@ -2058,10 +2142,11 @@ export class Model {
     const out = [];
     if (src) {
       const m = inst.m, mirror = det3(m) < 0;
-      const vmap = new Map();
-      const cv = (v) => { if (!vmap.has(v)) vmap.set(v, vertexAt(def, apply(m, src.verts.get(v)))); return vmap.get(v); };
+      const vmap = new Map(), ix = vertexIndex(def);
+      const cv = (v) => { if (!vmap.has(v)) vmap.set(v, ix.at(apply(m, src.verts.get(v)))); return vmap.get(v); };
       const rc = curveRemapper(def);
-      for (const e of src.edges.values()) out.push({ t: 'e', id: eAdd(def, cv(e.a), cv(e.b), e.soft, rc(e.curve), e.hidden) });
+      for (const e of src.edges.values()) { const id = eAdd(def, cv(e.a), cv(e.b), e.soft, rc(e.curve), e.hidden); ix.edgeAdded(id); out.push({ t: 'e', id }); }
+      ix.stop();   // faces may add edges of their own: a corner only a face uses is found the plain way
       for (const [cid, sp] of src.splines) def.splines.set(rc(cid), { ...sp, pts: sp.pts.map((p) => apply(m, p)) });
       for (const f of src.faces.values()) {
         let loops = f.loops.map((l) => l.map(cv));
@@ -2336,6 +2421,32 @@ export class Model {
     const dv = sub(pb, pa), i = [0, 1, 2].reduce((m, j) => (Math.abs(dv[j]) > Math.abs(dv[m]) + EPS ? j : m), 0);
     const [A, B, qa, qb] = dv[i] >= 0 ? [e.a, e.b, pa, pb] : [e.b, e.a, pb, pa];
     return this.resizeBetween({ path: path.slice(), v: A }, { path: path.slice(), v: B }, qa, qb, L, 'b');
+  }
+  // ---- what an edit changes (Model.change's scope) ----
+  /** The definitions resizeBetween(A, B, …) edits: for each end that may move, the context of the path it shares with the other. */
+  resizeScope(A, B) {
+    const ids = new Set();
+    for (const [E, F] of [[A, B], [B, A]]) {
+      if (!E) continue;
+      let k = 0;
+      if (F) while (k < E.path.length && k < F.path.length && E.path[k] === F.path[k]) k++;
+      const ctx = this.context(F ? E.path.slice(0, k) : E.path);
+      if (ctx) ids.add(ctx.def.id);
+    }
+    return [...ids];
+  }
+  /** The definitions setDimLength(id) edits. */
+  dimScope(id) {
+    const dm = this.dims.get(id);
+    if (!dm) return [];
+    if (dm.kind === 'rad' || dm.kind === 'dia') { const c = this.context(dm.c.path); return c ? [c.def.id] : []; }
+    return this.resizeScope(dm.a.path ? dm.a : null, dm.b.path ? dm.b : null);
+  }
+  /** The definitions holding placements tagged `name` (renameTag, deleteTag), or anything hidden (unhideAll: null). */
+  holding(name) {
+    return [...this.defs.values()].filter((d) => (name === null
+      ? [d.edges, d.faces, d.insts].some((map) => [...map.values()].some((o) => o.hidden))
+      : [...d.insts.values()].some((i) => i.tag === name))).map((d) => d.id);
   }
   /** A group's or component's size along its own red (0), green (1) or blue (2) axis: its far side moves. */
   setDefSize(defId, axis, size) {

@@ -313,7 +313,7 @@ export function createLive(model, opts = {}) {
       // every step of the model goes out: change() and commit() leave it on top of the undo stack
       const orig = { change: model.change, commit: model.commit, undo: model.undo, redo: model.redo, canUndo: model.canUndo, canRedo: model.canRedo };
       const sendTop = () => { const top = model.undoStack[model.undoStack.length - 1]; if (top && !top.live) { top.live = true; live.step(top.label, top.before, top.after); } };
-      model.change = function (label, fn) { const r = orig.change.call(model, label, fn); sendTop(); return r; };
+      model.change = function (label, fn, scope) { const r = orig.change.call(model, label, fn, scope); sendTop(); return r; };
       model.commit = function (label) { const r = orig.commit.call(model, label); sendTop(); return r; };
       const topLabel = (st) => (st.length ? st[st.length - 1].label || '' : '');
       model.undo = () => { const l = topLabel(client.undoStack); return client.undo() ? l : null; };
