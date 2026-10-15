@@ -18,7 +18,7 @@
  * Colours come from the page tokens (paper/model themes).
  */
 import * as THREE from 'three';
-import { add, sub, mul, dot, norm, apply, invert, dist, bboxAdd } from './vec.js';
+import { add, sub, mul, dot, norm, apply, invert, dist, bboxAdd, IDENT } from './vec.js';
 import { faceTris, faceNormal, edgeFaces, smoothNormals, paintHex, isMaterialPaint, isImagePaint, imageId, imageUV } from './model.js';
 import { sunPosition } from './sun.js';
 import { dimLayout, dimTextBox, dimText, sectionLayout } from './infer.js';
@@ -63,7 +63,7 @@ export class View3D {
     this.builtFor = null;
     this.w = 1; this.h = 1;
     this.applyTheme();
-    new MutationObserver(() => { this.applyTheme(); this.builtFor = null; this.invalidate(); })
+    new MutationObserver(() => { this.applyTheme(); this.dropCache(); this.builtFor = null; this.invalidate(); })
       .observe(document.documentElement, { attributes: true, attributeFilter: ['data-space'] });
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(gl.parentElement);
@@ -105,9 +105,11 @@ export class View3D {
   geometryOf(def, dflt = null) {
     const key = def.id + '|' + (dflt || '');
     let g = this.cache.get(key);
-    if (g && g.version === this.model.version) return g;
+    // still right while it is the same definition object and nothing has edited one in place since (model.unsafeVersion)
+    if (g && g.def === def && g.version >= (this.model.unsafeVersion ?? this.model.version)) return g;
     if (g) { g.faces?.dispose(); g.edges?.dispose(); for (const x of g.mats || []) x.geometry.dispose(); }
-    const pos = [], nor = [], col = [], faceOf = [];
+    const plain = [];   // [fid, normal, colour, triangles] of the faces drawn in colour
+    let ni = 0;
     const front = new THREE.Color(paintHex(dflt) || this.c.front);
     const tex = this.textures, byMat = new Map();   // 0.5 RC.7: faces painted with a library material, one mesh per material
     const smooth = smoothNormals(def);   // 0.4 M18: faces joined by soft edges shade as one surface
@@ -125,27 +127,46 @@ export class View3D {
           const p = def.verts.get(v), q = smooth.get(fid + '|' + v) || n, w = img ? imageUV(paint, p) : tex.uv(p, n);
           b.pos.push(p[0], p[1], p[2]); b.nor.push(q[0], q[1], q[2]); b.col.push(c.r, c.g, c.b); b.uv.push(w[0], w[1]);
         }
-        faceOf.push(fid);
         continue;
       }
-      for (const t of faceTris(def, f)) for (const v of t) {
-        const p = def.verts.get(v), q = smooth.get(fid + '|' + v) || n;
-        pos.push(p[0], p[1], p[2]); nor.push(q[0], q[1], q[2]); col.push(c.r, c.g, c.b);
+      const tris = faceTris(def, f);
+      plain.push([fid, n, c, tris]);
+      ni += tris.length * 3;
+    }
+    // indexed: a face's corners are shared by its triangles (same normal and colour), so each is shaded once
+    const pos = new Float32Array(ni * 3), nor = new Float32Array(ni * 3), col = new Float32Array(ni * 3);
+    const index = ni < 65536 ? new Uint16Array(ni) : new Uint32Array(ni);
+    let nv = 0, k = 0;
+    for (const [fid, n, c, tris] of plain) {
+      const at = new Map();
+      for (const t of tris) for (const v of t) {
+        let j = at.get(v);
+        if (j === undefined) {
+          j = nv++; at.set(v, j);
+          const p = def.verts.get(v), q = smooth.get(fid + '|' + v) || n, o = j * 3;
+          pos[o] = p[0]; pos[o + 1] = p[1]; pos[o + 2] = p[2];
+          nor[o] = q[0]; nor[o + 1] = q[1]; nor[o + 2] = q[2];
+          col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+        }
+        index[k++] = j;
       }
-      faceOf.push(fid);
     }
     const faces = new THREE.BufferGeometry();
-    faces.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    faces.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    faces.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    const ep = [];
+    faces.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, nv * 3), 3));
+    faces.setAttribute('normal', new THREE.BufferAttribute(nor.slice(0, nv * 3), 3));
+    faces.setAttribute('color', new THREE.BufferAttribute(col.slice(0, nv * 3), 3));
+    faces.setIndex(new THREE.BufferAttribute(index, 1));
+    let ne = 0;
+    for (const e of def.edges.values()) if (!e.soft && !e.hidden) ne++;
+    const ep = new Float32Array(ne * 6);
+    k = 0;
     for (const e of def.edges.values()) {
       if (e.soft || e.hidden) continue;
       const a = def.verts.get(e.a), b = def.verts.get(e.b);
-      ep.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+      ep[k++] = a[0]; ep[k++] = a[1]; ep[k++] = a[2]; ep[k++] = b[0]; ep[k++] = b[1]; ep[k++] = b[2];
     }
     const edges = new THREE.BufferGeometry();
-    edges.setAttribute('position', new THREE.Float32BufferAttribute(ep, 3));
+    edges.setAttribute('position', new THREE.BufferAttribute(ep, 3));
     const mats = [...byMat].map(([paint, b]) => {
       const mg = new THREE.BufferGeometry();
       mg.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
@@ -154,33 +175,75 @@ export class View3D {
       mg.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       return { id: paint, geometry: mg };   // 'mat:<id>' | 'img:<id>'
     });
-    g = { version: this.model.version, faces, edges, mats, hasFaces: pos.length > 0 || mats.length > 0 };
+    g = { def, version: this.model.version, faces, edges, mats, hasFaces: ni > 0 || mats.length > 0 };
     this.cache.set(key, g);
     return g;
+  }
+
+  /** Free one definition's geometry (or all). */
+  dropCache(id = null) {
+    for (const k of id === null ? [...this.cache.keys()] : [id]) {
+      const g = this.cache.get(k);
+      if (!g) continue;
+      g.faces.dispose(); g.edges.dispose(); for (const x of g.mats || []) x.geometry.dispose();
+      this.cache.delete(k);
+    }
   }
 
   materials(faded) {
     const st = this.style, op = faded ? 0.22 : 1;
     const xr = st.mode === 'xray';
     const common = { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, transparent: faded || xr, opacity: xr ? 0.45 * op : op, depthWrite: !(faded || xr), clippingPlanes: this.clip, clipShadows: true };
-    let front, back;
+    let front, back, texBack = null;
     if (st.mode === 'hidden') {
       front = new THREE.MeshBasicMaterial({ color: this.c.bg, side: THREE.DoubleSide, ...common });
       back = null;
     } else {
-      front = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide, ...common });
-      back = new THREE.MeshLambertMaterial({ color: this.c.back, side: THREE.BackSide, ...common });
+      // one pass for both sides (half the triangles to draw): the back of a face takes the back colour in the shader
+      front = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, shadowSide: THREE.BackSide, ...common });
+      const backColor = new THREE.Color(this.c.back);
+      front.onBeforeCompile = (sh) => {
+        sh.uniforms.backColor = { value: backColor };
+        sh.fragmentShader = 'uniform vec3 backColor;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n\tif (!gl_FrontFacing) diffuseColor.rgb = backColor;');
+      };
+      front.customProgramCacheKey = () => 'mc-two-sided';
+      back = null;
+      texBack = new THREE.MeshLambertMaterial({ color: this.c.back, side: THREE.BackSide, ...common });   // behind textured faces (their material is one-sided)
     }
     const edge = new THREE.LineBasicMaterial({ color: this.c.ink, transparent: faded, opacity: faded ? 0.3 : 1, clippingPlanes: this.clip });
-    return { front, back, edge };
+    return { front, back, texBack, edge };
+  }
+
+  /**
+   * The model's box in world space as drawn (shown placements), from each definition's own box under each placement's
+   * matrix, kept with its geometry: a moved placement costs its own vertices, the rest nothing.
+   */
+  placedBox(def, g, wm) {
+    const key = wm.join(',');
+    g.boxes ||= new Map();
+    let bb = g.boxes.get(key);
+    if (bb === undefined) {
+      bb = null;
+      for (const p of def.verts.values()) bb = bboxAdd(bb, apply(wm, p));
+      if (g.boxes.size > 4096) g.boxes.clear();
+      g.boxes.set(key, bb);
+    }
+    return bb;
   }
 
   build() {
     for (const o of [...this.root.children]) { if (o.userData.cap) o.geometry.dispose(); this.root.remove(o); }
-    for (const m of this._mats || []) m?.dispose();
     const u = this.ui();
-    const mats = { on: this.materials(false), off: this.materials(true) };
-    this._mats = [mats.on.front, mats.on.back, mats.on.edge, mats.off.front, mats.off.back, mats.off.edge];
+    // materials are kept while the style and colours stay the same (a new material is a new shader program to compile)
+    const mkey = this.style.mode + '|' + this.c.bg + '|' + this.c.back + '|' + this.c.ink;
+    if (this._matKey !== mkey) {
+      for (const m of this._mats || []) m?.dispose();
+      this._matSet = { on: this.materials(false), off: this.materials(true) };
+      this._mats = [...Object.values(this._matSet.on), ...Object.values(this._matSet.off)];
+      this._matKey = mkey;
+    }
+    const mats = this._matSet;
+    let box = null;
     const st = this.style;
     const live = new Set();
     // the active section cut (0.4 M7): three.js keeps what is in front of a plane, so the plane faces away from n
@@ -189,10 +252,12 @@ export class View3D {
     if (cut) this.clip.push(new THREE.Plane(new THREE.Vector3(-cut.n[0], -cut.n[1], -cut.n[2]), dot(cut.n, cut.p)));
     const solids = [];   // closed geometry the cut passes through gets a filled cap
     const offTags = this.model.hiddenTags ? this.model.hiddenTags() : new Set();   // 0.4 M6: placements with a hidden tag
-    const addDef = (def, parent, path, depth, dflt = null) => {
+    const addDef = (def, parent, path, depth, dflt = null, wm = IDENT) => {
       if (depth > 32) return;
       live.add(def.id + '|' + (dflt || ''));
       const g = this.geometryOf(def, dflt);
+      const pb = this.placedBox(def, g, wm);
+      if (pb) { box = bboxAdd(box, pb.min); box = bboxAdd(box, pb.max); }
       const active = path.length >= u.path.length && u.path.every((x, i) => path[i] === x);
       const m = active ? mats.on : mats.off;
       if (g.hasFaces && st.mode !== 'wire') {
@@ -209,7 +274,8 @@ export class View3D {
           tm.castShadow = st.shadows; tm.receiveShadow = st.shadows;
           parent.add(tm);
           if (closed) solids.push(tm);
-          if (m.back) { const b = new THREE.Mesh(x.geometry, m.back); b.castShadow = false; b.receiveShadow = st.shadows; parent.add(b); }
+          const bm = textured ? m.texBack : m.back;
+          if (bm) { const b = new THREE.Mesh(x.geometry, bm); b.castShadow = false; b.receiveShadow = st.shadows; parent.add(b); }
         }
       }
       if (st.edges || st.mode === 'wire') parent.add(new THREE.LineSegments(g.edges, m.edge));
@@ -220,12 +286,13 @@ export class View3D {
         grp.matrixAutoUpdate = false;
         grp.matrix.fromArray(inst.m);
         parent.add(grp);
-        addDef(d, grp, [...path, iid], depth + 1, inst.color || dflt);
+        addDef(d, grp, [...path, iid], depth + 1, inst.color || dflt, mmul4(wm, inst.m));
       }
     };
     addDef(this.model.root, this.root, [], 0);
+    this.bb = box;
     if (cut && solids.length) this.addCaps(solids, cut);
-    for (const [id, g] of this.cache) if (!live.has(id)) { g.faces.dispose(); g.edges.dispose(); for (const x of g.mats || []) x.geometry.dispose(); this.cache.delete(id); }
+    for (const id of [...this.cache.keys()]) if (!live.has(id)) this.dropCache(id);
     this.root.updateMatrixWorld(true);
     this.buildExtras(u);
     this.updateLights();
@@ -247,20 +314,19 @@ export class View3D {
   addCaps(solids, cut) {
     const stencil = (side, op) => new THREE.MeshBasicMaterial({ side, clippingPlanes: this.clip, depthWrite: false, depthTest: false, colorWrite: false,
       stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc, stencilFail: op, stencilZFail: op, stencilZPass: op });
-    const back = stencil(THREE.BackSide, THREE.IncrementWrapStencilOp), front = stencil(THREE.FrontSide, THREE.DecrementWrapStencilOp);
-    this._mats.push(back, front);
+    const back = this.xmat('capback', () => stencil(THREE.BackSide, THREE.IncrementWrapStencilOp)), front = this.xmat('capfront', () => stencil(THREE.FrontSide, THREE.DecrementWrapStencilOp));
     for (const m of solids) for (const mat of [back, front]) {
       const sm = new THREE.Mesh(m.geometry, mat);
       sm.renderOrder = 20;
       sm.frustumCulled = false;
       m.parent.add(sm);
     }
-    const bb = this.model.bbox();
+    const bb = this.bb;
     const size = bb ? dist(bb.min, bb.max) * 2 + 1 : 100;
-    const capMat = new THREE.MeshBasicMaterial({ color: this.c.cap, side: THREE.DoubleSide,
+    const capMat = this.xmat('cap', () => new THREE.MeshBasicMaterial({ side: THREE.DoubleSide,
       stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    this._mats.push(capMat);
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    capMat.color.set(this.c.cap);
     const cap = new THREE.Mesh(new THREE.PlaneGeometry(size, size), capMat);
     const c = bb ? mul(add(bb.min, bb.max), 0.5) : cut.p;
     const at = sub(c, mul(cut.n, dot(sub(c, cut.p), cut.n)));
@@ -272,9 +338,17 @@ export class View3D {
     this.root.add(cap);
   }
 
+  /** A material for the extras, kept from build to build (a new one would mean compiling its shader again): one per key. */
+  xmat(key, make) {
+    this._xmats ||= new Map();
+    let m = this._xmats.get(key);
+    if (!m) { m = make(); this._xmats.set(key, m); }
+    return m;
+  }
+
   buildExtras(u) {
-    for (const o of [...this.extras.children]) { this.extras.remove(o); o.geometry?.dispose(); o.material?.dispose(); }
-    const bb = this.model.bbox();
+    for (const o of [...this.extras.children]) { this.extras.remove(o); o.geometry?.dispose(); }
+    const bb = this.bb;
     const R = bb ? Math.max(dist(bb.min, bb.max), 10) : 30;
     this.radius = R;
     // axes of the open context: solid on the positive side, dashed on the negative
@@ -284,19 +358,21 @@ export class View3D {
     const axis = (dir, color) => {
       const o = apply(am, [0, 0, 0]), p = apply(am, mul(dir, L)), n = apply(am, mul(dir, -L));
       const pos = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...o), new THREE.Vector3(...p)]);
-      this.extras.add(new THREE.Line(pos, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8 })));
-      const neg = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...o), new THREE.Vector3(...n)]),
-        new THREE.LineDashedMaterial({ color, dashSize: R / 60, gapSize: R / 60, transparent: true, opacity: 0.6 }));
+      this.extras.add(new THREE.Line(pos, this.xmat('axis+' + color, () => new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8 }))));
+      const dm = this.xmat('axis-' + color, () => new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.6 }));
+      dm.dashSize = dm.gapSize = R / 60;
+      const neg = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...o), new THREE.Vector3(...n)]), dm);
       neg.computeLineDistances();
       this.extras.add(neg);
     };
     if (!u.present) { axis([1, 0, 0], this.c.red); axis([0, 1, 0], this.c.green); axis([0, 0, 1], this.c.blue); }
     // guide lines
+    const gm = this.xmat('guide', () => new THREE.LineDashedMaterial({ color: this.c.ink2, transparent: true, opacity: 0.75 }));
+    gm.color.set(this.c.ink2); gm.dashSize = R / 120; gm.gapSize = R / 160;
     if (u.guidesOn !== false && !u.present) for (const g of this.model.guides.values()) {
       if (g.kind !== 'line') continue;
       const a = add(g.p, mul(g.d, -L)), b = add(g.p, mul(g.d, L));
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...b)]),
-        new THREE.LineDashedMaterial({ color: this.c.ink2, dashSize: R / 120, gapSize: R / 160, transparent: true, opacity: 0.75 }));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...b)]), gm);
       line.computeLineDistances();
       this.extras.add(line);
     }
@@ -311,14 +387,16 @@ export class View3D {
     if (pos.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: this.c.sel, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }));
+      const sm = this.xmat('selfill', () => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }));
+      sm.color.set(this.c.sel);
+      const mesh = new THREE.Mesh(geo, sm);
       mesh.renderOrder = 5;
       this.extras.add(mesh);
     }
   }
 
   updateLights() {
-    const st = this.style, bb = this.model.bbox();
+    const st = this.style, bb = this.bb;
     const c = bb ? mul(add(bb.min, bb.max), 0.5) : [0, 0, 0];
     const R = bb ? Math.max(dist(bb.min, bb.max) / 2, 2) : 10;
     let dir;
@@ -380,6 +458,14 @@ export class View3D {
     });
   }
 
+  /** model.bbox(def, m) for the overlay, kept until the model changes (it is drawn on every frame of a camera move). */
+  boxOf(def, m = null) {
+    const key = this.model.version + '|' + def.id + '|' + (m ? m.join(',') : '');
+    this._boxes ||= new Map();
+    if (!this._boxes.has(key)) { if (this._boxes.size > 64) this._boxes.clear(); this._boxes.set(key, m ? this.model.bbox(def, m) : this.model.bbox(def)); }
+    return this._boxes.get(key);
+  }
+
   // ---- the 2D overlay ----
   seg(a, b, vp) {
     // clip to the near plane before projecting, so lines through the eye still draw
@@ -409,7 +495,7 @@ export class View3D {
     };
     // the open group's box
     if (u.path.length && !u.present) {
-      const bb = this.model.bbox(ctx.def, ctx.m);
+      const bb = this.boxOf(ctx.def, ctx.m);
       if (bb) this.box(bb, (a, b) => line(a, b, this.c.ink2, 1, [4, 4]));
     }
     // guide points
@@ -579,7 +665,7 @@ export class View3D {
         if (!inst) continue;
         const d = this.model.def(inst.def);
         const m = mmul4(ctx.m, inst.m);
-        const bbLocal = this.model.bbox(d);
+        const bbLocal = this.boxOf(d);
         if (!bbLocal) continue;
         // the instance's own box, transformed (so a rotated group shows a rotated box)
         const c = (i) => apply(m, [i & 1 ? bbLocal.max[0] : bbLocal.min[0], i & 2 ? bbLocal.max[1] : bbLocal.min[1], i & 4 ? bbLocal.max[2] : bbLocal.min[2]]);

@@ -30,7 +30,7 @@
  */
 import { Model, connected, eraseSel, reverseFaces, solidInfo, faceArea, cleanScene, curveInfo, setCurveRadius, PALETTE, paintFaces, paintInstance, isColor, isMaterialPaint, setMaterialColors, setImageColors, isImagePaint, flipSel, hideSel, isolateSel, unhideAll, hiddenCount, softenEdges, intersectFaces, solidProblems, fixSolid, faceNormal, cleanStoreys } from './model.js';
 import { Camera, VIEWS, lerpCam } from './camera.js';
-import { sceneOf, angleLayout, formatDeg } from './infer.js';
+import { sceneOf, warmScene, angleLayout, formatDeg } from './infer.js';
 import { Tools, TOOL_NAMES, TOOL_KEYS } from './tools.js';
 import { View3D } from './view3d.js';
 import { pngName } from './viewimage.js';
@@ -92,6 +92,18 @@ function init(root) {
 
   // ---- host for the tools ----
   let sc = null;
+  // snapping's trees for what is on screen and the model's undo copy, made in idle time after a change (a big model's first
+  // hover and first undo step then have them)
+  let warmJob = 0;
+  const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 2000 }) : (f) => setTimeout(() => f({ timeRemaining: () => 8 }), 50);
+  function warmPicking() {
+    if (warmJob) return;
+    warmJob = idle(function step(dl) {
+      warmJob = 0;
+      const more = () => dl.timeRemaining() > 2;
+      if (!warmScene(model, more) || !model.warmSnap(more)) warmJob = idle(step);
+    });
+  }
   const host = {
     model, cam, path: [], sel: [], overlayState: null, mouse: null,
     get units() { return model.units; },
@@ -106,7 +118,7 @@ function init(root) {
     tip(t) { ui.tip.textContent = t || ''; },
     vcb(label, text) { ui.vcbLabel.textContent = label || t('ui.vcb'); if (document.activeElement !== ui.vcb) ui.vcb.value = text || ''; },
     print,
-    changed() { scheduleInfo(); view.invalidate(); },
+    changed() { scheduleInfo(); view.invalidate(); warmPicking(); },
     openContext(path) {
       if (!model.context(path)) return;
       host.path = path; host.sel = []; tools.set(tools.name === 'place' ? 'select' : tools.name);
@@ -753,11 +765,7 @@ function init(root) {
     // zoom toward what is under the cursor (a face), else the target plane
     let pivot = null;
     const s = host.scene();
-    let best = Infinity;
-    for (const f of s.faces) for (const [a, b, c] of f.tris) {
-      const t = rayTriT(r.o, r.d, a, b, c);
-      if (t !== null && t < best) best = t;
-    }
+    const best = s.hit(r)?.t ?? Infinity;
     if (best < Infinity) pivot = [r.o[0] + r.d[0] * best, r.o[1] + r.d[1] * best, r.o[2] + r.d[2] * best];
     // a pinch sends small deltas: zoom it faster than a wheel notch
     const k = Math.exp((e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY) * (e.ctrlKey ? 0.01 : 0.0015 * wheelFactor()));   // IP.3: the style's wheel (a pinch stays as it is)
@@ -1382,7 +1390,8 @@ function init(root) {
 
   // ---- panels: outliner, components, entity info ----
   let infoTimer = 0;
-  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); renderLights(); }); }
+  // the panels wait while a tool previews (a drag): they show the model once it is put down, not on every frame
+  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; if (model.previewing) return; renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); renderLights(); }); }
   let scenesSeen = '';
   function renderScenesIfChanged() { const k = JSON.stringify(model.scenes.map((s) => s.name)) + sceneIndex; if (k !== scenesSeen) { scenesSeen = k; renderScenes(); } }
 
@@ -2470,18 +2479,4 @@ function init(root) {
   }
 }
 
-function rayTriT(o, d, a, b, c) {
-  const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
-  const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
-  if (Math.abs(det) < 1e-14) return null;
-  const inv = 1 / det, s = [o[0] - a[0], o[1] - a[1], o[2] - a[2]];
-  const u = (s[0] * p[0] + s[1] * p[1] + s[2] * p[2]) * inv;
-  if (u < 0 || u > 1) return null;
-  const q = [s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]];
-  const v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
-  if (v < 0 || u + v > 1) return null;
-  const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
-  return t > 0 ? t : null;
-}
 export { TOOL_NAMES, VIEWS, connected };
