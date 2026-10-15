@@ -14,42 +14,193 @@
  * A point or edge snap that lies on the face under the cursor carries that face too (`face`), so a
  * rectangle or circle started there takes the face's plane (0.4 U.2).
  */
-import { add, sub, mul, dot, cross, len, norm, dist, apply, rayTri, rayToSegment, lineLine, rayPlane, closestOnLine, planeFrom, applyDir } from './vec.js';
+import { add, sub, mul, dot, cross, len, norm, dist, apply, rayTri, rayToSegment, lineLine, rayPlane, closestOnLine, planeFrom, applyDir, invert } from './vec.js';
+import { BoxTree, boxesOf } from './bvh.js';
 import { faceTris, faceNormal } from './model.js';
 import { t } from "./i18n.js";
 
 /** Inference tips in the page's language (getters: read when asked for). */
 export const TIPS = Object.defineProperties({}, Object.fromEntries(['end', 'mid', 'center', 'guidept', 'origin', 'edge', 'guide', 'face', 'ground', 'plane', 'axis-x', 'axis-y', 'axis-z', 'parallel', 'perp', 'lock'].map((k) => [k, { get: () => t('m3d.tip.' + k.toLowerCase().replace(/[^a-z0-9]+/g, '_')), enumerable: true }])));
 
-/** Flatten the model into world space once per version. */
+/**
+ * What can be snapped to and picked, in world space. Each definition's faces and edges are kept in its own space with
+ * trees over its triangles and edges (made once per definition object, again only after it is edited in place — see
+ * model.unsafeVersion), and each placement is a definition and its matrix; so a change rebuilds only what changed, and
+ * a ray or the cursor's neighbourhood finds the few triangles and edges near it.
+ *   sc.hit(ray, filter)        nearest face under a ray: {t, f, p} | null
+ *   sc.near(cam, ray, px)      edges that may lie within px pixels of the ray (a superset; the caller measures)
+ *   sc.face(path, id)          one face; sc.faces / sc.edges: all of them (made when first asked; for whole-model jobs)
+ * A face is {path, def, id, tris, n, plane}, an edge {path, def, id, a, b, soft}, in world space, the same object each time.
+ */
 export function sceneOf(model) {
-  const faces = [], edges = [];
   // the active section cut (0.4 M7): what lies on the side it cuts away cannot be snapped to or picked either
   const cut = model.activeCut ? model.activeCut() : null;
   const keep = cut ? (p) => dot(sub(p, cut.p), cut.n) <= 1e-9 : null;
+  const since = model.unsafeVersion ?? model.version;
+  const insts = [];
   // hidden things (0.4 M17) are left out: they cannot be snapped to, picked or window-selected
   (model.walkShown ? model.walkShown.bind(model) : model.walk.bind(model))((def, m, path) => {
-    for (const [id, f] of def.faces) {
-      if (f.hidden) continue;
-      const tris = faceTris(def, f).map((t) => t.map((v) => apply(m, def.verts.get(v))));
-      const n = norm(applyDir(m, faceNormal(def, f)));
-      const P = apply(m, def.verts.get(f.loops[0][0]));
-      if (keep && !tris.some((t) => t.some(keep))) continue;
-      faces.push({ path, def: def.id, id, tris, n, plane: { n, d: dot(n, P) } });
-    }
-    for (const [id, e] of def.edges) {
-      if (e.hidden) continue;
-      const a = apply(m, def.verts.get(e.a)), b = apply(m, def.verts.get(e.b));
-      if (keep && !keep(a) && !keep(b)) continue;
-      edges.push({ path, def: def.id, id, a, b, soft: !!e.soft });
-    }
+    const L = localOf(def, since);
+    if (L.faces.length || L.edges.length) insts.push(new Placed(def, m, path, L, keep));
   });
-  return { faces, edges, guides: model.guides, version: model.version, keep };
+  return new Scene(insts, model.guides, model.version, keep);
+}
+
+/**
+ * Make the trees of the definitions on screen ahead of time, a few at a time while `more()` (idle time left), so the
+ * first hover over a big model does not wait for them. → true when every one is ready.
+ */
+export function warmScene(model, more) {
+  const since = model.unsafeVersion ?? model.version, seen = new Set();
+  let done = true;
+  (model.walkShown ? model.walkShown.bind(model) : model.walk.bind(model))((def) => {
+    if (seen.has(def)) return false;
+    seen.add(def);
+    const L = local.get(def);
+    if (L && L.ver >= since) return;
+    if (!more()) { done = false; return false; }
+    localOf(def, since);
+  });
+  return done;
+}
+
+const local = new WeakMap();   // definition object → its faces and edges in its own space, with trees
+function localOf(def, since) {
+  let L = local.get(def);
+  if (L && L.ver >= since) return L;
+  const faces = [], edges = [];
+  let nt = 0;
+  for (const [id, f] of def.faces) {
+    if (f.hidden) continue;
+    const tris = faceTris(def, f).map((t) => t.map((v) => def.verts.get(v)));
+    faces.push({ id, tris, n: faceNormal(def, f), P: def.verts.get(f.loops[0][0]) });
+    nt += tris.length;
+  }
+  for (const [id, e] of def.edges) if (!e.hidden) edges.push({ id, a: def.verts.get(e.a), b: def.verts.get(e.b), soft: !!e.soft });
+  const tri = new Float64Array(nt * 9), triFace = new Uint32Array(nt);
+  let k = 0;
+  faces.forEach((f, fi) => { for (const t of f.tris) { for (let j = 0; j < 3; j++) tri.set(t[j], k * 9 + j * 3); triFace[k++] = fi; } });
+  const tb = new Float64Array(nt * 6);
+  for (let i = 0; i < nt; i++) for (let a = 0; a < 3; a++) {
+    const x = tri[i * 9 + a], y = tri[i * 9 + 3 + a], z = tri[i * 9 + 6 + a];
+    tb[i * 6 + a] = Math.min(x, y, z); tb[i * 6 + 3 + a] = Math.max(x, y, z);
+  }
+  L = { ver: since, faces, edges, tri, triFace, ftree: new BoxTree(tb), etree: new BoxTree(boxesOf(edges.length, (i) => [edges[i].a, edges[i].b])) };
+  local.set(def, L);
+  return L;
+}
+
+/** One placement of a definition: world faces and edges made as they are asked for. */
+class Placed {
+  constructor(def, m, path, L, keep) {
+    this.def = def; this.m = m; this.path = path; this.L = L; this.keep = keep;
+    this.fo = new Map(); this.eo = new Map();
+    // how much the matrix can stretch a length (for distances measured in its space)
+    this.s = Math.sqrt(Math.max(m[0] * m[0] + m[1] * m[1] + m[2] * m[2], m[4] * m[4] + m[5] * m[5] + m[6] * m[6], m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
+  }
+  get inv() { return (this._inv ??= invert(this.m)); }
+  /** World face i (null when the section cut hides it). */
+  face(i) {
+    let f = this.fo.get(i);
+    if (f !== undefined) return f;
+    const lf = this.L.faces[i], m = this.m;
+    const tris = lf.tris.map((t) => t.map((p) => apply(m, p)));
+    const n = norm(applyDir(m, lf.n));
+    f = this.keep && !tris.some((t) => t.some(this.keep)) ? null : { path: this.path, def: this.def.id, id: lf.id, tris, n, plane: { n, d: dot(n, apply(m, lf.P)) } };
+    this.fo.set(i, f);
+    return f;
+  }
+  edge(i) {
+    let e = this.eo.get(i);
+    if (e !== undefined) return e;
+    const le = this.L.edges[i], a = apply(this.m, le.a), b = apply(this.m, le.b);
+    e = this.keep && !this.keep(a) && !this.keep(b) ? null : { path: this.path, def: this.def.id, id: le.id, a, b, soft: le.soft };
+    this.eo.set(i, e);
+    return e;
+  }
+}
+
+class Scene {
+  constructor(insts, guides, version, keep) { this.insts = insts; this.guides = guides; this.version = version; this.keep = keep; }
+  get faces() {
+    if (!this._faces) { this._faces = []; for (const P of this.insts) for (let i = 0; i < P.L.faces.length; i++) { const f = P.face(i); if (f) this._faces.push(f); } }
+    return this._faces;
+  }
+  get edges() {
+    if (!this._edges) { this._edges = []; for (const P of this.insts) for (let i = 0; i < P.L.edges.length; i++) { const e = P.edge(i); if (e) this._edges.push(e); } }
+    return this._edges;
+  }
+  face(path, id) {
+    for (const P of this.insts) {
+      if (P.path.length !== path.length || !P.path.every((x, i) => x === path[i])) continue;
+      const i = P.L.faces.findIndex((f) => f.id === id);
+      return i < 0 ? null : P.face(i);
+    }
+    return null;
+  }
+  /** The nearest face a ray meets (filter(f) → false skips a face): {t, f, p} | null. */
+  hit(ray, filter) {
+    let best = null;
+    const lim = { t: Infinity }, o = ray.o, d = ray.d;
+    for (const P of this.insts) {
+      const inv = P.inv, oL = apply(inv, o), dL = applyDir(inv, d), tri = P.L.tri;
+      P.L.ftree.ray(oL, dL, (i) => {
+        const q = i * 9;
+        const t = rayTriA(oL, dL, tri, q);
+        if (t === null || t >= lim.t) return false;
+        const f = P.face(P.L.triFace[i]);
+        if (!f || (filter && !filter(f))) return false;
+        const p = add(o, mul(d, t));
+        if (this.keep && !this.keep(p)) return false;
+        best = { t, f, p }; lim.t = t;
+        return false;
+      }, lim);
+    }
+    return best;
+  }
+  /** Edges that may come within px pixels of the ray on screen: the rest cannot (a cone around the ray, wider with distance). */
+  near(cam, ray, px) {
+    const out = [], o = ray.o, d = ray.d;
+    const k = cam.persp ? (2 * Math.tan((cam.fov * Math.PI) / 360)) / cam.h * px : 0;
+    const flat = cam.persp ? 0 : cam.pixelSize() * px;
+    for (const P of this.insts) {
+      if (!P.L.edges.length) continue;
+      const m = P.m, s = P.s, c = [0, 0, 0];
+      const test = (lo, hi) => {
+        const cl = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+        const r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2 * s;
+        const w = apply(m, cl); c[0] = w[0] - o[0]; c[1] = w[1] - o[1]; c[2] = w[2] - o[2];
+        const along = c[0] * d[0] + c[1] * d[1] + c[2] * d[2];
+        if (cam.persp && along < -r) return false;   // behind the eye
+        const perp = Math.sqrt(Math.max(0, c[0] * c[0] + c[1] * c[1] + c[2] * c[2] - along * along));
+        const reach = cam.persp ? k * (Math.hypot(c[0], c[1], c[2]) + r) : flat;
+        return perp <= r + reach * 1.01 + 1e-9;
+      };
+      P.L.etree.walk(test, (i) => { const e = P.edge(i); if (e) out.push(e); });
+    }
+    return out;
+  }
+}
+
+/** rayTri on a triangle packed in a Float64Array at q (9 numbers). */
+function rayTriA(o, d, T, q) {
+  const ax = T[q], ay = T[q + 1], az = T[q + 2];
+  const e1x = T[q + 3] - ax, e1y = T[q + 4] - ay, e1z = T[q + 5] - az, e2x = T[q + 6] - ax, e2y = T[q + 7] - ay, e2z = T[q + 8] - az;
+  const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+  const det = e1x * px + e1y * py + e1z * pz;
+  if (Math.abs(det) < 1e-14) return null;
+  const inv = 1 / det, sx = o[0] - ax, sy = o[1] - ay, sz = o[2] - az, u = (sx * px + sy * py + sz * pz) * inv;
+  if (u < -1e-9 || u > 1 + 1e-9) return null;
+  const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x, v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+  if (v < -1e-9 || u + v > 1 + 1e-9) return null;
+  const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+  return t > 0 ? t : null;
 }
 
 const startsWith = (path, pre) => pre.every((x, i) => path[i] === x);
 
 function faceHit(sc, ray, filter) {
+  if (sc.hit) return sc.hit(ray, filter);
   let best = null;
   for (const f of sc.faces) {
     if (filter && !filter(f)) continue;
@@ -63,6 +214,8 @@ function faceHit(sc, ray, filter) {
   }
   return best;
 }
+/** The edges that can be within px pixels of the cursor's ray (all of them for a scene without trees). */
+const nearEdges = (sc, cam, ray, px) => (sc.near ? sc.near(cam, ray, px) : sc.edges);
 
 /**
  * opts: from (start point), lockDir (a direction the result must stay on), ref (an edge {a,b} for
@@ -78,6 +231,7 @@ export function infer(sc, cam, x, y, opts = {}) {
   const skip = typeof opts.skip === 'function' ? opts.skip : () => false;
   const visible = (fo) => !skip(fo, 'f');
   const hit = faceHit(sc, ray, visible);
+  const close = opts.snap !== false ? nearEdges(sc, cam, ray, R + 4) : [];   // points (bias up to 3 px) and edges near the cursor
   // is p hidden behind a face? (a ray of its own from the eye)
   const ax0 = cam.axes().z;
   const depthOk = (p) => {
@@ -100,7 +254,7 @@ export function infer(sc, cam, x, y, opts = {}) {
     if (d < R) pts.push({ p, kind, d, ...extra });
   };
   const snap = opts.snap !== false;
-  for (const e of snap ? sc.edges : []) {
+  for (const e of close) {
     if (skip(e, 'e')) continue;
     tryPt(e.a, 'end', -3, { edge: e });
     tryPt(e.b, 'end', -3, { edge: e });
@@ -153,7 +307,7 @@ export function infer(sc, cam, x, y, opts = {}) {
   // on an edge or a guide line
   let on = null;
   const ons = [];
-  for (const e of snap ? sc.edges : []) {
+  for (const e of close) {
     if (skip(e, 'e')) continue;
     const r = rayToSegment(ray.o, ray.d, e.a, e.b);
     if (r.t < 0 || (sc.keep && !sc.keep(r.onSeg))) continue;
@@ -238,7 +392,7 @@ export function pick(sc, cam, x, y, { path = [], radius = 7 } = {}) {
   const asSel = (o, t) => (o.path.length > path.length ? { t: 'i', id: o.path[path.length] } : { t, id: o.id });
   const hit = faceHit(sc, ray, inCtx);
   let best = null;
-  for (const e of sc.edges) {
+  for (const e of nearEdges(sc, cam, ray, radius + 1)) {
     if (!inCtx(e) || e.soft) continue;
     const r = rayToSegment(ray.o, ray.d, e.a, e.b);
     if (r.t < 0 || (sc.keep && !sc.keep(r.onSeg))) continue;

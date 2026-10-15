@@ -137,6 +137,16 @@ function vertFaces(def) {
 export function faceTris(def, f) {
   const n = faceNormal(def, f);
   if (!len(n)) return [];
+  // the common faces of big (imported) models: a triangle is itself, a quad is split along a diagonal that keeps both
+  // halves facing front (either one for a convex quad, the one through the dent for a concave one)
+  if (f.loops.length === 1 && (f.loops[0].length === 3 || f.loops[0].length === 4)) {
+    const l = f.loops[0];
+    if (l.length === 3) return [[l[0], l[1], l[2]]];
+    const P = l.map((v) => def.verts.get(v));
+    const up = (a, b, c) => dot(cross(sub(P[b], P[a]), sub(P[c], P[a])), n) > 0;
+    if (up(0, 1, 2) && up(0, 2, 3)) return [[l[0], l[1], l[2]], [l[0], l[2], l[3]]];
+    if (up(1, 2, 3) && up(1, 3, 0)) return [[l[1], l[2], l[3]], [l[1], l[3], l[0]]];
+  }
   const fr = frame(n);
   const flat = [], ids = [], holes = [];
   f.loops.forEach((l, i) => {
@@ -1632,6 +1642,7 @@ export class Model {
     this.undoStack = [];
     this.redoStack = [];
     this.dirty = false;
+    this._editing = 0;   // inside an edit (change, amend, preview): definitions' kept JSON is not used
     this._base = null;
     this.uid = newUid();
   }
@@ -1732,35 +1743,38 @@ export class Model {
   // ---- undo ----
   /** Run fn(model) as one undo step labelled `label`. */
   change(label, fn) {
-    const before = this.snapshot();
+    const before = this.snap();
     let r;
-    try { r = fn(this); } catch (e) { this.restore(before); throw e; }
-    const after = this.snapshot();
-    if (after !== before) {
-      this.undoStack.push({ label, before, after });
+    this._editing++;
+    try { r = fn(this); } catch (e) { this._editing--; this.restore(before); throw e; }
+    this._editing--;
+    this.version++;   // fn edited in place: nothing kept from before it is known to be right any more
+    const after = this.snap();
+    if (!sameSnap(after, before)) {
+      this.undoStack.push(new Step(label, before, after));
       if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
       this.redoStack = [];
       this.dirty = true;
     }
-    this.version++;
     return r;
   }
   canUndo() { return this.undoStack.length > 0; }
   canRedo() { return this.redoStack.length > 0; }
+  // restoring swaps in new definition objects only where they differ, so what was built from the rest stays right
   undo() {
     const s = this.undoStack.pop();
     if (!s) return null;
-    this.restore(s.before);
+    this.restore(s.b);
     this.redoStack.push(s);
-    this.version++; this.dirty = true;
+    this.bumpSafe(); this.dirty = true;
     return s.label;
   }
   redo() {
     const s = this.redoStack.pop();
     if (!s) return null;
-    this.restore(s.after);
+    this.restore(s.a);
     this.undoStack.push(s);
-    this.version++; this.dirty = true;
+    this.bumpSafe(); this.dirty = true;
     return s.label;
   }
   /** The newest undo step (a tool keeps it to amend it), or null. */
@@ -1768,41 +1782,131 @@ export class Model {
   /** Do the newest undo step again as fn(model) from its own start (push/pull: a distance typed after the click). False — and
    *  nothing changed — when `step` is no longer the newest, a preview is open, or fn throws. */
   amendLast(step, fn) {
-    if (!step || this.lastStep() !== step || this._base !== null) return false;
-    this.restore(step.before);
-    try { fn(this); } catch (e) { this.restore(step.after); this.version++; return false; }
-    step.after = this.snapshot();
-    this.redoStack = []; this.dirty = true; this.version++;
+    if (!step || this.lastStep() !== step || this._pv) return false;
+    this.restore(step.b);
+    this._editing++;
+    try { fn(this); } catch (e) { this._editing--; this.restore(step.a); this.bumpSafe(); return false; }
+    this._editing--;
+    this.version++;
+    step.a = this.snap();
+    this.redoStack = []; this.dirty = true;
     return true;
   }
-  /** Live previews (push/pull drag, move): begin → preview(fn)… → commit(label) | abort(). */
-  begin() { this._base = this.snapshot(); }
-  get previewing() { return this._base !== null; }
-  preview(fn) {
-    this.restore(this._base);
-    let r;
-    try { r = fn(this); } catch (e) { this.restore(this._base); r = null; }
-    this.version++;
+  /**
+   * Live previews (push/pull drag, move): begin → preview(fn, scope?)… → commit(label) | abort(). `scope` lists the only
+   * definitions fn changes: each frame then puts back just those (and drops definitions the last frame made) instead
+   * of the whole model, and they come back as new objects, so the view rebuilds only them. Without a scope, every
+   * frame restores the whole model from its starting copy. `_base` is that starting copy as a snapshot, made when asked.
+   */
+  begin() { this._pv = { full: null, defs: new Map(), strs: new Map(), ids: new Set(this.defs.keys()), nextId: this.nextId, mixed: false }; }
+  get previewing() { return !!this._pv; }
+  /** The preview's starting copy: a Snap while only scoped frames ran, else the whole as a string. */
+  baseSnap() {
+    const pv = this._pv;
+    if (pv.full !== null) return pv.full;
+    const j = this.toJSON(true);
+    j.nextId = pv.nextId;
+    return new Snap(JSON.stringify(j), [...pv.ids].map((id) => {
+      if (!pv.defs.has(id)) return [id, this.defString(this.defs.get(id))];
+      if (!pv.strs.has(id)) pv.strs.set(id, JSON.stringify(pv.defs.get(id)));
+      return [id, pv.strs.get(id)];
+    }));
+  }
+  get _base() {
+    const pv = this._pv;
+    if (!pv) return null;
+    if (pv.full === null) pv.full = this.baseSnap().s;
+    return pv.full;
+  }
+  set _base(s) { this._pv = typeof s === 'string' ? { full: s, defs: new Map(), strs: new Map(), ids: null, nextId: null, mixed: true } : null; }
+  /** Back to the preview's start: scoped (the definitions changed so far, plus `more`) or whole. */
+  revertPreview(more = []) {
+    const pv = this._pv;
+    if (pv.mixed) { this.restore(pv.full); return false; }
+    for (const id of [...this.defs.keys()]) if (!pv.ids.has(id)) this.defs.delete(id);
+    for (const id of more) {
+      if (!pv.ids.has(id) || pv.defs.has(id)) continue;
+      const d = this.defs.get(id), c = defStrs.get(d);
+      pv.defs.set(id, defToJSON(d));
+      if (c && c.v >= this.unsafeVersion) pv.strs.set(id, c.s);   // its copy as JSON is known already
+    }
+    for (const [id, j] of pv.defs) this.defs.set(id, defOf(j));
+    this.nextId = pv.nextId;
+    return true;
+  }
+  preview(fn, scope = null) {
+    const pv = this._pv;
+    if (scope && !pv.mixed) this.revertPreview(scope);
+    else { const full = this._base; this.restore(full); pv.mixed = true; }
+    let r = null, ok = true;
+    this._editing++;
+    try { r = fn(this); } catch (e) { ok = false; } finally { this._editing--; }
+    if (!ok) { this.revertPreview(); r = null; }
+    if (pv.mixed) this.version++; else this.bumpSafe();
     return r;
   }
   commit(label) {
-    const after = this.snapshot();
-    if (this._base !== null && after !== this._base) {
-      this.undoStack.push({ label, before: this._base, after });
-      if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
-      this.redoStack = [];
-      this.dirty = true;
+    if (this._pv) {
+      const before = this.baseSnap(), after = this.snap();
+      if (!sameSnap(after, before)) {
+        this.undoStack.push(new Step(label, before, after));
+        if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
+        this.redoStack = [];
+        this.dirty = true;
+      }
     }
-    this._base = null;
-    this.version++;
+    this._pv = null;
+    this.bumpSafe();
   }
   abort() {
-    if (this._base !== null) this.restore(this._base);
-    this._base = null;
-    this.version++;
+    const safe = this._pv ? this.revertPreview() : true;
+    this._pv = null;
+    if (safe) this.bumpSafe(); else this.version++;
   }
-  snapshot() { return JSON.stringify(this.toJSON()); }
-  restore(s) { this.load(JSON.parse(s), { keepHistory: true }); }
+  /**
+   * `version` goes up on every change; `unsafeVersion` is the last version that may have changed a definition in place.
+   * A step that only swaps whole definitions for new objects (a scoped preview frame, an undo) goes up by bumpSafe(), so
+   * what was built from a definition object at or after unsafeVersion is still right while that object is in place.
+   * Code elsewhere that edits in place and sets `version++` is unsafe, as before.
+   */
+  get version() { return this._v; }
+  set version(v) { this._v = v; this.unsafeVersion = v; }
+  bumpSafe() { this._v++; }
+  /** A definition as JSON, kept with the definition object until it may have been edited in place. */
+  defString(d) {
+    if (this._editing) return JSON.stringify(defToJSON(d));
+    const c = defStrs.get(d);
+    if (c && c.v >= this.unsafeVersion) return c.s;
+    const s = JSON.stringify(defToJSON(d));
+    defStrs.set(d, { v: this._v, s });
+    return s;
+  }
+  /** Make definitions' JSON ahead of time while `more()` (idle time left), so the next undo step is quick. → true when done. */
+  warmSnap(more) {
+    for (const d of this.defs.values()) {
+      const c = defStrs.get(d);
+      if (c && c.v >= this.unsafeVersion) continue;
+      if (this._editing || this._pv || !more()) return false;
+      this.defString(d);
+    }
+    return true;
+  }
+  /** A copy of the model for undo (see Snap). */
+  snap() { return new Snap(JSON.stringify(this.toJSON(true)), [...this.defs.values()].map((d) => [d.id, this.defString(d)])); }
+  snapshot() { return this.snap().s; }
+  /** Back to a copy (a Snap or a snapshot string). From a Snap, a definition whose JSON is unchanged keeps its object. */
+  restore(s) {
+    if (!(s instanceof Snap)) { this.load(JSON.parse(s), { keepHistory: true }); return; }
+    const defs = new Map(), made = [];
+    for (const [id, str] of s.parts) {
+      const cur = this.defs.get(id), c = cur && defStrs.get(cur);
+      if (c && c.s === str && c.v >= this.unsafeVersion) { defs.set(id, cur); continue; }
+      const d = defOf(JSON.parse(str));
+      defs.set(id, d); made.push([d, str]);
+    }
+    this.load(JSON.parse(s.head), { keepHistory: true, defs });
+    for (const [d, str] of made) defStrs.set(d, { v: this._v, s: str });
+  }
 
   // ---- instances ----
   /** Visit the root and every instance below it: cb(def, worldMatrix, path of instance ids). */
@@ -2245,10 +2349,11 @@ export class Model {
   }
 
   // ---- files ----
-  toJSON() {
+  /** The model in its file form; `noDefs`: defs: 0 in place of the definitions (Snap's head). */
+  toJSON(noDefs = false) {
     return {
       format: FORMAT, version: VERSION, units: this.units, nextId: this.nextId,
-      defs: [...this.defs.values()].map(defToJSON),
+      defs: noDefs ? 0 : [...this.defs.values()].map(defToJSON),
       guides: [...this.guides].map(([id, g]) => ({ id, ...g })),
       ...(this.lights.size ? { lights: [...this.lights].map(([id, L]) => ({ id, ...structuredLight(L) })) } : {}),
       ...(this.sections.size ? { sections: [...this.sections].map(([id, s]) => ({ id, p: s.p.slice(), n: s.n.slice(), name: s.name })), activeSection: this.activeSection } : {}),
@@ -2270,19 +2375,18 @@ export class Model {
     };
   }
   /** Load a parsed native file (untrusted unless it is our own snapshot). Throws a plain Error. */
-  load(j, { keepHistory = false } = {}) {
+  /** Open a model from its file form. `defs` (restore from a Snap): the definitions already made, j.defs left out. */
+  load(j, { keepHistory = false, defs: made = null } = {}) {
     const fail = (m) => { throw new Error(t('m3d.model.file_bad', { why: m })); };
     if (!j || typeof j !== 'object' || j.format !== FORMAT) fail(t('m3d.model.the_format_mark_is_missing'));
     if (!Number.isInteger(j.version) || j.version < 1) fail(t('m3d.model.the_version_is_missing'));
     if (j.version > VERSION) throw new Error(t('m3d.model.file_newer', { v: j.version }));
-    if (!Array.isArray(j.defs) || !j.defs.length) fail(t('m3d.model.it_has_no_model'));
-    const defs = new Map();
-    for (const dj of j.defs.slice(0, 100000)) {
+    if (!made && (!Array.isArray(j.defs) || !j.defs.length)) fail(t('m3d.model.it_has_no_model'));
+    const defs = made || new Map();
+    for (const dj of made ? [] : j.defs.slice(0, 100000)) {
       if (!dj || typeof dj.id !== 'string' || !/^(root|d\d{1,9})$/.test(dj.id)) fail(t('m3d.model.a_definition_id_is_wrong'));
       if (defs.has(dj.id)) fail(t('m3d.model.a_definition_appears_twice'));
-      const kind = dj.id === 'root' ? 'root' : dj.kind === 'component' ? 'component' : 'group';
-      const d = new Def(dj.id, kind, cleanText(dj.name, 120) || (kind === 'root' ? 'Model' : kind === 'component' ? 'Component' : 'Group'));
-      defFromJSON(d, dj, fail);
+      const d = defOf(dj, fail);
       defs.set(d.id, d);
     }
     if (!defs.has('root')) fail(t('m3d.model.it_has_no_root'));
@@ -2369,7 +2473,7 @@ export class Model {
     this.units = UNIT_KEYS.includes(j.units) ? j.units : 'ft-in';
     this.nextId = Math.max(Number.isInteger(j.nextId) ? j.nextId : 1, maxId + 1);
     if (!keepHistory) { this.undoStack = []; this.redoStack = []; this.dirty = false; this._base = null; this.uid = newUid(); }
-    this.version++;
+    if (made) this.bumpSafe(); else this.version++;   // given definitions are new objects or untouched ones
   }
 }
 
@@ -2459,6 +2563,35 @@ function defToJSON(d) {
     insts: [...d.insts].map(([id, i]) => { const o = { id, def: i.def, m: i.m }; if (i.name) o.name = i.name; if (i.color) o.color = i.color; if (i.hidden) o.hidden = true; if (i.tag) o.tag = i.tag; if (i.rule) o.rule = { ...i.rule }; return o; }),
     ...(d.splines.size ? { splines: [...d.splines].map(([id, sp]) => ({ id, pts: sp.pts, closed: !!sp.closed, segs: sp.segs })) } : {}),
   };
+}
+/** Each definition object's JSON, with the version it was made at (Model.defString). */
+const defStrs = new WeakMap();
+/**
+ * A copy of the model for undo: `head` the model's JSON with defs: 0, `parts` [[id, JSON]] for each definition. A
+ * definition's JSON is the same string from copy to copy while it is unchanged, so a step holds only what it changed;
+ * `s` is the whole model as one JSON string (the snapshot), made when asked.
+ */
+class Snap {
+  constructor(head, parts) { this.head = head; this.parts = parts; }
+  get s() { return this.head.replace('"defs":0', '"defs":[' + this.parts.map((p) => p[1]).join(',') + ']'); }
+}
+const sameSnap = (x, y) => (x instanceof Snap && y instanceof Snap
+  ? x.head === y.head && x.parts.length === y.parts.length && x.parts.every((p, i) => p[0] === y.parts[i][0] && p[1] === y.parts[i][1])
+  : (x instanceof Snap ? x.s : x) === (y instanceof Snap ? y.s : y));
+/** An undo step: `before` and `after` are snapshot strings (live.js sends them), kept as Snaps (`b`, `a`). */
+class Step {
+  constructor(label, b, a) { this.label = label; this.b = b; this.a = a; }
+  get before() { return this.b instanceof Snap ? this.b.s : this.b; }
+  set before(v) { this.b = v; }
+  get after() { return this.a instanceof Snap ? this.a.s : this.a; }
+  set after(v) { this.a = v; }
+}
+/** A new definition from its file form. */
+function defOf(dj, fail) {
+  const kind = dj.id === 'root' ? 'root' : dj.kind === 'component' ? 'component' : 'group';
+  const d = new Def(dj.id, kind, cleanText(dj.name, 120) || (kind === 'root' ? 'Model' : kind === 'component' ? 'Component' : 'Group'));
+  defFromJSON(d, dj, fail);
+  return d;
 }
 function defFromJSON(d, j, fail = (m) => { throw new Error(m); }) {
   if (typeof j.starter === 'string' && /^[a-z0-9_]{1,32}$/.test(j.starter)) d.starter = j.starter;   // 0.4 M25: which starter thing it is

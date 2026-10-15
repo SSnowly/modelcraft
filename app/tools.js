@@ -31,7 +31,7 @@ import { infer, pick, pickWindow, alongLine, pickDim, pickSection, angleLayout, 
 import {
   addEdge, addPolygon, rectPts, ngonPts, pushPull, transformSel, copySel, eraseEdges, faceWithEdges, connected,
   edgeFaces, removeLooseVerts, arcPts, tagCurve, offsetFacePts, offsetFace, offsetChainPts, faceNormal, paintFaces, paintInstance,
-  smoothPts, addSpline, editSpline, followMe, chainThrough,
+  smoothPts, addSpline, editSpline, followMe, chainThrough, edgeBetween,
 } from './model.js';
 import { parseValue, formatLength } from './units.js';
 import { collider } from './collide.js';
@@ -222,6 +222,8 @@ class Tool {
   /** A move/rotate/scale started from a key (grab, turn, resize) goes back to Select when it ends. */
   done() { if (this.modal) { this.modal = false; this.T.set('select'); } }
   marker(r) { return r ? { p: r.p, kind: r.kind } : null; }
+  /** What a live preview changes: only the open context's own definition (model.preview's scope). */
+  scope() { const c = this.h.model.context(this.h.path); return c ? [c.def.id] : null; }
 }
 
 /** Point-picking tools: press = a click, and a drag released away from the press = a second click. */
@@ -1012,7 +1014,7 @@ class PushTool extends ClickTool {
     this.lastEv = ev;
     if (this.fid === null) {
       const s = pick(this.h.scene(), this.h.cam, ev.x, ev.y, { path: this.h.path });
-      const f = s && s.t === 'f' ? this.h.scene().faces.find((x) => x.id === s.id && same(x.path, this.h.path)) : null;
+      const f = s && s.t === 'f' ? this.h.scene().face(this.h.path, s.id) : null;
       this.h.overlay(f ? { faces: f.tris, tip: t('m3d.tool.push_or_pull_this_face') } : null);
       return;
     }
@@ -1042,7 +1044,7 @@ class PushTool extends ClickTool {
       if (r.hit) { d = Math.sign(d) * len(r.delta); this.stopped = true; }
     }
     this.d = d;
-    const r = this.h.model.preview((m) => pushPull(m.context(this.h.path).def, this.fid, d * k));
+    const r = this.h.model.preview((m) => pushPull(m.context(this.h.path).def, this.fid, d * k), this.scope());
     if (r && r.ok) this.d = r.distance / k;
     this.h.changed();
     this.h.vcb(t('m3d.vcb.distance'), this.fmt(Math.abs(this.d)));
@@ -1054,7 +1056,7 @@ class PushTool extends ClickTool {
       const sc = this.h.scene();
       const s = pick(sc, this.h.cam, ev.x, ev.y, { path: this.h.path });
       if (!s || s.t !== 'f') { this.h.print(t('m3d.tool.push_pull_works_on_a_face')); return; }
-      const f = sc.faces.find((x) => x.id === s.id && same(x.path, this.h.path));
+      const f = sc.face(this.h.path, s.id);
       const ray = this.h.cam.ray(ev.x, ev.y), g = rayPlane(ray.o, ray.d, f.plane);
       this.fid = s.id;
       this.f0 = f;
@@ -1088,7 +1090,7 @@ class PushTool extends ClickTool {
     if (!s || s.t !== 'f') return;
     // the first click of the double-click may have started a push on the same face
     if (this.busy) { this.h.model.abort(); this.reset(); }
-    const f = this.h.scene().faces.find((x) => x.id === s.id && same(x.path, this.h.path));
+    const f = this.h.scene().face(this.h.path, s.id);
     const k = len(this.T.localDir(f.n)) || 1;
     this.h.model.change(t('m3d.undo.push_pull'), (m) => pushPull(m.context(this.h.path).def, s.id, this.last.d * k));
     this.h.changed();
@@ -1159,7 +1161,7 @@ class MoveTool extends ClickTool {
     const def = this.T.ctx().def;
     const eids = new Set(), fids = new Set(), iids = new Set();
     for (const s of sel) (s.t === 'e' ? eids : s.t === 'f' ? fids : iids).add(s.id);
-    for (const fid of fids) { const f = def.faces.get(fid); if (f) for (const l of f.loops) for (let i = 0; i < l.length; i++) { const a = l[i], b = l[(i + 1) % l.length]; for (const [eid, e] of def.edges) if ((e.a === a && e.b === b) || (e.a === b && e.b === a)) eids.add(eid); } }
+    for (const fid of fids) { const f = def.faces.get(fid); if (f) for (const l of f.loops) for (let i = 0; i < l.length; i++) { const eid = edgeBetween(def, l[i], l[(i + 1) % l.length]); if (eid !== null) eids.add(eid); } }
     const P = this.h.path;
     return (o, t) => {
       if (o.path.length > P.length && same(o.path.slice(0, P.length), P)) return iids.has(o.path[P.length]);
@@ -1193,7 +1195,7 @@ class MoveTool extends ClickTool {
       const s = copy ? copySel(def, sel) : sel;
       transformSel(def, s, translation(ld));
       return s;
-    });
+    }, this.scope());
     this.h.changed();
     this.h.vcb(t('m3d.vcb.distance'), this.fmt(len(delta)));
   }
@@ -1323,7 +1325,7 @@ class RotateTool extends ClickTool {
     this.angle = a;
     const T = this.T, sel = this.h.sel.filter((s) => s.t !== 'g' && s.t !== 'd' && s.t !== 's');
     const m4 = rotation(T.localDir(this.n), a, T.local(this.c));
-    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4));
+    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4), this.scope());
     this.h.changed();
     this.h.vcb(t('m3d.vcb.angle'), (a * 180 / Math.PI).toFixed(1));
   }
@@ -1457,7 +1459,7 @@ class ScaleTool extends ClickTool {
     const S = [fs[0], 0, 0, 0, 0, fs[1], 0, 0, 0, 0, fs[2], 0, 0, 0, 0, 1];
     const m4 = mmul(translation(a), mmul(S, translation(mul(a, -1))));
     this.fs = fs;
-    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4));
+    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4), this.scope());
     this.h.changed();
     this.h.vcb(t('m3d.vcb.scale'), fs.map((x) => String(+x.toFixed(4))).join(', '));
   }
@@ -1498,7 +1500,7 @@ class ScaleTool extends ClickTool {
     this.f = f;
     const T = this.T, sel = this.h.sel.filter((s) => s.t !== 'g' && s.t !== 'd' && s.t !== 's');
     const m4 = scaling(f, T.local(this.base));
-    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4));
+    this.h.model.preview((m) => transformSel(m.context(this.h.path).def, sel, m4), this.scope());
     this.h.changed();
     this.h.vcb(t('m3d.vcb.scale'), String(+f.toFixed(4)));
   }
