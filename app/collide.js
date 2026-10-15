@@ -2,13 +2,15 @@
 /**
  * collide.js — keep solids from passing through each other while they move. No DOM, no three.js.
  *
- *   const c = collider(sc, { moving(o, t), ignore(o, t) })   sc = sceneOf(model) before the move
+ *   const c = collider(sc, { moving(o, t), ignore(o, t), whole?(path) })   sc = sceneOf(model) before the move
  *   c.clamp(delta) → { delta, hit }                          the longest part of a straight move that
  *                                                            stays clear (hit = it was shortened)
  *
  * moving(o, 'e'|'f') — the faces and edges that travel rigidly (a selection, the groups in it, a pushed face).
  * ignore(o, 'e'|'f') — geometry that is neither in the way nor travelling: loose geometry stuck to what moves
  *                      (it stretches), the pushed face's own solid.
+ * whole(path)        — optional: 'moving' or 'static' when everything a placement holds is the same (its items are then
+ *                      not asked one by one: a big model starts moving at once), null to ask each.
  * Everything else is in the way. Touching is fine — faces lying on each other, edges meeting along a face,
  * a box set down on a box — only passing into the inside counts: an edge crossing a face's interior, or a point
  * of one solid's face inside the other (three rays agree). Things already overlapping when the move starts are
@@ -22,7 +24,7 @@ import { BoxTree, boxesOf } from './bvh.js';
 const TOL = 1e-5;           // 10 µm: closer than this counts as touching
 const MAX_STEPS = 160;
 
-export function collider(sc, { moving, ignore = () => false }) {
+export function collider(sc, { moving, ignore = () => false, whole: wholeOf = null }) {
   const mov = { faces: [], edges: [] };
   const objs = new Map();   // key → { faces, edges }
   const obj = (o) => {
@@ -34,14 +36,20 @@ export function collider(sc, { moving, ignore = () => false }) {
     // a scene of placements (infer.js): moving() and ignore() look only at path and id, so they are asked with just
     // those; a placement in the way gets its world faces when the moving pieces first reach its box (in ready())
     for (const P of sc.insts) {
-      const L = P.L;
+      const L = P.L, all = wholeOf ? wholeOf(P.path) : null;
+      if (all === 'moving') {
+        for (let i = 0; i < L.faces.length; i++) mov.faces.push(P.face(i));
+        for (let i = 0; i < L.edges.length; i++) { const e = P.edge(i); mov.edges.push({ a: e.a, b: e.b }); }
+        continue;
+      }
       let o = null, whole = true;
+      if (all === 'static' && (L.faces.length || L.edges.length)) o = { key: P.path.join('/'), P, all: true, fi: [], ei: [] };
       const put = (kind, i) => { o ||= { key: P.path.join('/'), P, fi: [], ei: [] }; o[kind].push(i); };
-      L.faces.forEach((lf, i) => {
+      if (!o?.all) L.faces.forEach((lf, i) => {
         const q = { path: P.path, id: lf.id };
         if (moving(q, 'f')) { mov.faces.push(P.face(i)); whole = false; } else if (!ignore(q, 'f')) put('fi', i); else whole = false;
       });
-      L.edges.forEach((le, i) => {
+      if (!o?.all) L.edges.forEach((le, i) => {
         const q = { path: P.path, id: le.id };
         if (moving(q, 'e')) { const e = P.edge(i); mov.edges.push({ a: e.a, b: e.b }); whole = false; } else if (!ignore(q, 'e')) put('ei', i); else whole = false;
       });
@@ -127,9 +135,11 @@ function placedBox(o, whole) {
     const X = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w, Y = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w, Z = (m[2] * x + m[6] * y + m[10] * z + m[14]) / w;
     if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y; if (Z < z0) z0 = Z; if (Z > z1) z1 = Z;
   };
-  if (whole) { const T = L.tri; for (let i = 0; i < T.length; i += 3) put(T[i], T[i + 1], T[i + 2]); }
-  else for (const i of o.fi) for (const t of L.faces[i].tris) for (const p of t) put(p[0], p[1], p[2]);
-  for (const i of o.ei) { const e = L.edges[i]; put(e.a[0], e.a[1], e.a[2]); put(e.b[0], e.b[1], e.b[2]); }
+  if (whole) { const T = L.pts; for (let i = 0; i < T.length; i += 3) put(T[i], T[i + 1], T[i + 2]); }
+  else {
+    for (const i of o.fi) for (const t of L.faces[i].tris) for (const p of t) put(p[0], p[1], p[2]);
+    for (const i of o.ei) { const e = L.edges[i]; put(e.a[0], e.a[1], e.a[2]); put(e.b[0], e.b[1], e.b[2]); }
+  }
   return x0 <= x1 ? { min: [x0, y0, z0], max: [x1, y1, z1] } : null;
 }
 
@@ -147,7 +157,10 @@ function bboxOf(o) {
 /** An object's faces ready for testing, and trees over its faces and edges: made the first time its box is reached. */
 function ready(o) {
   if (o.F) return;
-  if (o.P) { o.faces = o.fi.map((i) => o.P.face(i)); o.edges = o.ei.map((i) => { const e = o.P.edge(i); return { a: e.a, b: e.b }; }); }
+  if (o.P) {
+    const { P } = o, fi = o.all ? P.L.faces.map((_, i) => i) : o.fi, ei = o.all ? P.L.edges.map((_, i) => i) : o.ei;
+    o.faces = fi.map((i) => P.face(i)); o.edges = ei.map((i) => { const e = P.edge(i); return { a: e.a, b: e.b }; });
+  }
   o.F = o.faces.map(prepFace);
   o.ftree = new BoxTree(boxesOf(o.F.length, (i) => o.F[i].tris.flat(), TOL * 2));
   o.etree = new BoxTree(boxesOf(o.edges.length, (i) => [o.edges[i].a, o.edges[i].b], TOL * 2));

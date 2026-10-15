@@ -56,6 +56,7 @@ export class Def {
     this.insts = new Map();
     this.splines = new Map();    // curve id → {pts: points clicked (def coordinates), closed, segs} (0.4 M27: editable curves)
     this.next = 1;
+    this.rev = 0;                // goes up when a scoped change edits it in place (Model.change's scope)
     this._ek = null;
   }
 }
@@ -1742,13 +1743,20 @@ export class Model {
 
   // ---- undo ----
   /** Run fn(model) as one undo step labelled `label`. */
-  change(label, fn) {
+  /**
+   * Run fn(model) as one undo step labelled `label`. `scope`: the ids of the only definitions fn edits in place (new
+   * definitions it makes do not count; [] = none, as for guides or dimensions): what was built from every other
+   * definition is kept (the view's geometry, snapping's trees, undo's copies), so an edit to a big model costs what it
+   * touched. Without it, everything may have changed.
+   */
+  change(label, fn, scope = null) {
     const before = this.snap();
     let r;
     this._editing++;
     try { r = fn(this); } catch (e) { this._editing--; this.restore(before); throw e; }
     this._editing--;
-    this.version++;   // fn edited in place: nothing kept from before it is known to be right any more
+    if (scope) { for (const id of scope) { const d = this.defs.get(id); if (d) d.rev++; } this.bumpSafe(); }
+    else this.version++;   // fn edited in place: nothing kept from before it is known to be right any more
     const after = this.snap();
     if (!sameSnap(after, before)) {
       this.undoStack.push(new Step(label, before, after));
@@ -1828,7 +1836,7 @@ export class Model {
       if (!pv.ids.has(id) || pv.defs.has(id)) continue;
       const d = this.defs.get(id), c = defStrs.get(d);
       pv.defs.set(id, defToJSON(d));
-      if (c && c.v >= this.unsafeVersion) pv.strs.set(id, c.s);   // its copy as JSON is known already
+      if (this.kept(d, c)) pv.strs.set(id, c.s);   // its copy as JSON is known already
     }
     for (const [id, j] of pv.defs) this.defs.set(id, defOf(j));
     this.nextId = pv.nextId;
@@ -1872,20 +1880,25 @@ export class Model {
   get version() { return this._v; }
   set version(v) { this._v = v; this.unsafeVersion = v; }
   bumpSafe() { this._v++; }
+  /**
+   * What was made from definition object d (`e` = {v, rev}: stamp(d) when it was made) is still right: nothing has edited
+   * a definition in place unknown since (unsafeVersion), nor d itself in a scoped change (its rev).
+   */
+  kept(d, e) { return !!e && e.v >= this.unsafeVersion && e.rev === d.rev; }
+  stamp(d) { return { v: this._v, rev: d.rev }; }
   /** A definition as JSON, kept with the definition object until it may have been edited in place. */
   defString(d) {
     if (this._editing) return JSON.stringify(defToJSON(d));
     const c = defStrs.get(d);
-    if (c && c.v >= this.unsafeVersion) return c.s;
+    if (this.kept(d, c)) return c.s;
     const s = JSON.stringify(defToJSON(d));
-    defStrs.set(d, { v: this._v, s });
+    defStrs.set(d, { ...this.stamp(d), s });
     return s;
   }
   /** Make definitions' JSON ahead of time while `more()` (idle time left), so the next undo step is quick. → true when done. */
   warmSnap(more) {
     for (const d of this.defs.values()) {
-      const c = defStrs.get(d);
-      if (c && c.v >= this.unsafeVersion) continue;
+      if (this.kept(d, defStrs.get(d))) continue;
       if (this._editing || this._pv || !more()) return false;
       this.defString(d);
     }
@@ -1900,12 +1913,12 @@ export class Model {
     const defs = new Map(), made = [];
     for (const [id, str] of s.parts) {
       const cur = this.defs.get(id), c = cur && defStrs.get(cur);
-      if (c && c.s === str && c.v >= this.unsafeVersion) { defs.set(id, cur); continue; }
+      if (c && c.s === str && this.kept(cur, c)) { defs.set(id, cur); continue; }
       const d = defOf(JSON.parse(str));
       defs.set(id, d); made.push([d, str]);
     }
     this.load(JSON.parse(s.head), { keepHistory: true, defs });
-    for (const [d, str] of made) defStrs.set(d, { v: this._v, s: str });
+    for (const [d, str] of made) defStrs.set(d, { ...this.stamp(d), s: str });
   }
 
   // ---- instances ----

@@ -351,7 +351,7 @@ function init(root) {
     const sel = host.sel.filter((x) => x.t === 'f' || x.t === 'i');
     if (sel.length && tools.name !== 'paint') {
       const def = model.context(host.path).def;
-      model.change(t('app.undo.paint'), () => { paintFaces(def, sel.filter((x) => x.t === 'f').map((x) => x.id), c); for (const x of sel) if (x.t === 'i') paintInstance(def, x.id, c); });
+      model.change(t('app.undo.paint'), () => { paintFaces(def, sel.filter((x) => x.t === 'f').map((x) => x.id), c); for (const x of sel) if (x.t === 'i') paintInstance(def, x.id, c); }, [def.id]);
       print(t('app.paint.sel', { color: name }));
       scheduleInfo(); view.invalidate();
     } else { setTool('paint'); print(t('app.paint.start', { color: name })); }
@@ -421,7 +421,7 @@ function init(root) {
   host.lightPlaced = (id) => { selLight = id; renderLights(true); print(t('app.light.added', { name: lightName(id, model.lights.get(id)) })); };
   const changeLight = (patch) => {
     if (selLight === null || !model.lights.has(selLight)) return;
-    try { model.change(t('app.undo.light'), (m) => m.setLight(selLight, patch)); host.changed(); renderLights(true); } catch (e) { print(e.message); }
+    try { model.change(t('app.undo.light'), (m) => m.setLight(selLight, patch), []); host.changed(); renderLights(true); } catch (e) { print(e.message); }
   };
   function renderLights(force = false) {
     const key = model.version + '|' + selLight + '|' + model.units;
@@ -467,7 +467,7 @@ function init(root) {
     const del = el('button', { type: 'button', className: 'btn-line btn-sm-cc', dataset: { lightDelete: '' } }, t('app.light.delete'));
     del.addEventListener('click', () => {
       const id = selLight, nm = lightName(id, model.lights.get(id));
-      model.change(t('app.undo.light.delete'), (m) => m.deleteLight(id));
+      model.change(t('app.undo.light.delete'), (m) => m.deleteLight(id), []);
       selLight = null; host.changed(); renderLights(true); print(t('app.light.deleted', { name: nm }));
     });
     lightEdit.replaceChildren(...rows, el('span'), del);
@@ -953,7 +953,7 @@ function init(root) {
       case 'terrain-grid': closeMenus(); terrainGridDialog(); break;
       case 'sculpt': closeMenus(); setTool('sculpt'); break;
       case 'axes-face': axesToFace(); break;
-      case 'axes-reset': closeMenus(); if (!model.axesM) { print(t('app.axes.already')); break; } model.change(t('m3d.undo.axes'), (m) => m.resetAxes()); print(t('app.axes.reset')); afterHistory(); break;
+      case 'axes-reset': closeMenus(); if (!model.axesM) { print(t('app.axes.already')); break; } model.change(t('m3d.undo.axes'), (m) => m.resetAxes(), []); print(t('app.axes.reset')); afterHistory(); break;
       case 'intersect-model': intersectSel('model'); break;
       case 'intersect-sel': intersectSel('selection'); break;
       case 'solid-union': solidTool('union'); break;
@@ -985,7 +985,7 @@ function init(root) {
     let best = 0;
     for (let i = 1; i < loop.length; i++) if (dist(loop[i], loop[(i + 1) % loop.length]) > dist(loop[best], loop[(best + 1) % loop.length])) best = i;
     const o = loop[best], x = sub(loop[(best + 1) % loop.length], o), n = faceNormal(def, f);
-    model.change(t('m3d.undo.axes'), (m) => m.setAxes(o, x, cross(n, x)));
+    model.change(t('m3d.undo.axes'), (m) => m.setAxes(o, x, cross(n, x)), []);
     print(t('app.axes.face'));
     afterHistory();
   }
@@ -1045,7 +1045,7 @@ function init(root) {
     const sel = host.sel.filter((x) => x.t === 'e' || x.t === 'f' || x.t === 'i');
     if (!sel.length) { print(t('app.hide.none')); return; }
     tools.escape();
-    model.change(t('app.undo.hide'), (m) => hideSel(m.context(host.path).def, sel, true));
+    model.change(t('app.undo.hide'), (m) => hideSel(m.context(host.path).def, sel, true), [model.context(host.path).def.id]);
     host.setSel([]);
     print(t('app.hide.done', { n: sel.length }));
   }
@@ -1081,7 +1081,7 @@ function init(root) {
     const sel = host.sel.filter((s) => s.t !== 'g' && s.t !== 'd' && s.t !== 's');
     if (!sel.length) { print(t('app.group.none')); return; }
     // a selected face brings its edges; a lone edge selection brings everything connected to it? No: exactly what is selected.
-    const iid = model.change(kind === 'group' ? t('app.undo.make_group') : t('app.undo.make_component'), (m) => m.makeGroup(m.context(host.path).def, sel, kind));
+    const iid = model.change(kind === 'group' ? t('app.undo.make_group') : t('app.undo.make_component'), (m) => m.makeGroup(m.context(host.path).def, sel, kind), [model.context(host.path).def.id]);
     if (iid) {
       host.setSel([{ t: 'i', id: iid }]);
       const d = model.def(ctxDef().insts.get(iid).def);
@@ -1187,7 +1187,7 @@ function init(root) {
   const secPlanesBtn = $('[data-sec-planes]'), secCutsBtn = $('[data-sec-cuts]');
   function syncSectionMenu() { secPlanesBtn.setAttribute('aria-checked', String(model.sectionView.planes)); secCutsBtn.setAttribute('aria-checked', String(model.sectionView.cuts)); }
   function setSectionView(key, on) {
-    model.change(t(on ? 'app.undo.sec_show' : 'app.undo.sec_hide'), (m) => { m.sectionView[key] = on; });
+    model.change(t(on ? 'app.undo.sec_show' : 'app.undo.sec_hide'), (m) => { m.sectionView[key] = on; }, []);
     if (key === 'planes' && !on) host.setSel(host.sel.filter((s) => s.t !== 's'));
     print(t('app.sec.' + key + (on ? '.on' : '.off')));
     syncSectionMenu(); afterHistory();
@@ -1238,7 +1238,7 @@ function init(root) {
   $('[data-scene-add]').addEventListener('click', () => {
     const name = t('app.scene.default', { n: model.scenes.length + 1 });
     const s = cleanScene({ name, cam: cam.toJSON(), style: view.style, vis: model.captureVis() });
-    model.change(t('ui.scenes.add'), (m) => { m.scenes = [...m.scenes, s]; });
+    model.change(t('ui.scenes.add'), (m) => { m.scenes = [...m.scenes, s]; }, []);
     sceneIndex = model.scenes.length - 1;
     renderScenes();
     print(t('app.scene.saved', { name }));
@@ -1369,7 +1369,7 @@ function init(root) {
   }
   function updateScene(i) {
     const s = cleanScene({ name: model.scenes[i].name, cam: cam.toJSON(), style: view.style, vis: model.captureVis() });
-    model.change(t('app.undo.scene_update'), (m) => { m.scenes = m.scenes.map((x, k) => (k === i ? s : x)); });
+    model.change(t('app.undo.scene_update'), (m) => { m.scenes = m.scenes.map((x, k) => (k === i ? s : x)); }, []);
     sceneIndex = i;
     renderScenes();
     print(t('app.scene.updated', { name: s.name }));
@@ -1377,12 +1377,12 @@ function init(root) {
   async function renameScene(i) {
     const name = await askText(t('app.scene.rename.h'), t('app.scene.rename.label'), model.scenes[i].name);
     if (!name) return;
-    model.change(t('app.scene.rename.h'), (m) => { m.scenes = m.scenes.map((x, k) => (k === i ? { ...x, name: name.slice(0, 80) } : x)); });
+    model.change(t('app.scene.rename.h'), (m) => { m.scenes = m.scenes.map((x, k) => (k === i ? { ...x, name: name.slice(0, 80) } : x)); }, []);
     renderScenes();
   }
   function deleteScene(i) {
     const nm = model.scenes[i].name;
-    model.change(t('app.undo.scene_delete'), (m) => { m.scenes = m.scenes.filter((_, k) => k !== i); });
+    model.change(t('app.undo.scene_delete'), (m) => { m.scenes = m.scenes.filter((_, k) => k !== i); }, []);
     if (sceneIndex >= model.scenes.length) sceneIndex = model.scenes.length - 1;
     renderScenes();
     print(t('app.scene.deleted', { name: nm }));
@@ -1423,7 +1423,7 @@ function init(root) {
       if (done) return; done = true;
       const v = inp.value.trim().slice(0, 120);
       inp.blur();
-      if (keep && v && v !== d.name) { model.change(t('app.scene.rename'), (m) => { m.def(d.id).name = v; }); print(t('app.tree.renamed', { name: v })); }
+      if (keep && v && v !== d.name) { model.change(t('app.scene.rename'), (m) => { m.def(d.id).name = v; }, [d.id]); print(t('app.tree.renamed', { name: v })); }
       afterHistory(); renderTree();
     };
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); });
@@ -1476,7 +1476,7 @@ function init(root) {
         btn.addEventListener('drop', (e) => { e.preventDefault(); btn.classList.remove('is-drop'); moveRow(p); });
         // the eye: hide or show this placement (Edit › More › Hide does the same)
         const eye = el('button', { type: 'button', className: 'mc-eye', 'aria-pressed': String(!inst.hidden), title: t(inst.hidden ? 'app.tree.show' : 'app.tree.hide', { name: d.name }), 'aria-label': t(inst.hidden ? 'app.tree.show' : 'app.tree.hide', { name: d.name }),
-          onclick: () => { model.change(t(inst.hidden ? 'app.undo.unhide' : 'app.undo.hide'), (m) => hideSel(m.context(path).def, [{ t: 'i', id: iid }], !inst.hidden)); host.setSel(host.sel.filter((s) => s.id !== iid)); afterHistory(); } },
+          onclick: () => { model.change(t(inst.hidden ? 'app.undo.unhide' : 'app.undo.hide'), (m) => hideSel(m.context(path).def, [{ t: 'i', id: iid }], !inst.hidden), [model.context(path).def.id]); host.setSel(host.sel.filter((s) => s.id !== iid)); afterHistory(); } },
           el('i', { className: inst.hidden ? 'bi bi-eye-slash' : 'bi bi-eye', 'aria-hidden': 'true' }));
         const li = el('li', { dataset: { iid: String(iid) } }, el('div', { className: 'mc-node-row' }, btn, eye));
         if (d.insts.size) { const sub = el('ul'); walk(d, p, sub, depth + 1); if (sub.children.length) li.append(sub); }
@@ -1537,7 +1537,7 @@ function init(root) {
   }
   function showTag(name, on) {
     tools.escape();
-    model.change(t(on ? 'app.undo.tag_show' : 'app.undo.tag_hide'), (m) => m.setTagHidden(name, !on));
+    model.change(t(on ? 'app.undo.tag_show' : 'app.undo.tag_hide'), (m) => m.setTagHidden(name, !on), []);
     if (!on) {
       // what now hides cannot stay selected, and a group being edited inside closes above the first hidden one
       let def = model.root, k = 0;
@@ -1550,7 +1550,7 @@ function init(root) {
     tagsDrawn = ''; afterHistory();
   }
   function addTagRow() {
-    const nm = model.change(t('app.undo.tag_add'), (m) => m.addTag());
+    const nm = model.change(t('app.undo.tag_add'), (m) => m.addTag(), []);
     tagsDrawn = ''; renderTags(); scheduleInfo();
     const inp = ui.tags.querySelector(`li[data-tag="${CSS.escape(nm)}"] input`);
     if (inp) { inp.focus(); inp.select(); }
@@ -1565,7 +1565,7 @@ function init(root) {
   function tagSelection(name) {
     const iids = host.sel.filter((s) => s.t === 'i').map((s) => s.id);
     if (!iids.length) return;
-    model.change(t('app.undo.tag_set'), (m) => m.setTag(m.context(host.path).def, iids, name || null));
+    model.change(t('app.undo.tag_set'), (m) => m.setTag(m.context(host.path).def, iids, name || null), [model.context(host.path).def.id]);
     if (name && model.tag(name)?.hidden) { host.setSel(host.sel.filter((s) => s.t !== 'i')); print(t('app.tag.set_hidden', { name })); }
     else print(name ? t('app.tag.set', { name, n: iids.length }) : t('app.tag.unset', { n: iids.length }));
     tagsDrawn = ''; afterHistory();
@@ -1587,7 +1587,7 @@ function init(root) {
         print(t('app.check.showing', { list }));
       } }, t('app.check.show')),
       el('button', { type: 'button', className: 'mc-linkbtn', onclick: () => {
-        const r = model.change(t('app.undo.fix_solid'), (m) => fixSolid(m.def(d.id)));
+        const r = model.change(t('app.undo.fix_solid'), (m) => fixSolid(m.def(d.id)), [d.id]);
         const done = [r.stray && t('app.check.fixed.stray', { n: r.stray }), r.inner && t('app.check.fixed.inner', { n: r.inner }), r.flipped && t('app.check.fixed.flipped', { n: r.flipped }), r.holes && t('app.check.fixed.holes', { n: r.holes })].filter(Boolean).join(' · ');
         const left = problemList(solidProblems(model.def(d.id)));
         print(!done ? t('app.check.nothing', { left }) : left ? t('app.check.fixed_left', { done, left }) : t('app.check.fixed', { done }));
@@ -1602,7 +1602,7 @@ function init(root) {
     const inp = el('input', { type: 'number', id: 'mc-soften', className: 'mc-input', min: 0, max: 180, step: 1, value: softenDeg });
     const go = (deg) => {
       const tg = target();
-      const n = model.change(t(deg > 0 ? 'app.undo.soften' : 'app.undo.harden'), (m) => softenEdges(tg.defId ? m.def(tg.defId) : m.context(tg.path).def, tg.eids, deg));
+      const n = model.change(t(deg > 0 ? 'app.undo.soften' : 'app.undo.harden'), (m) => softenEdges(tg.defId ? m.def(tg.defId) : m.context(tg.path).def, tg.eids, deg), [tg.defId || model.context(tg.path).def.id]);
       print(deg > 0 ? t('app.soften.done', { deg, n }) : t('app.harden.done', { n }));
       afterHistory();
     };
@@ -1621,7 +1621,7 @@ function init(root) {
       el('option', { value: '\u0001' }, t('app.info.tag.new')));
     sel.value = tags.size > 1 ? '\u0000' : [...tags][0];
     sel.addEventListener('change', () => {
-      if (sel.value === '\u0001') { const nm = model.change(t('app.undo.tag_add'), (m) => m.addTag()); tagSelection(nm); return; }
+      if (sel.value === '\u0001') { const nm = model.change(t('app.undo.tag_add'), (m) => m.addTag(), []); tagSelection(nm); return; }
       tagSelection(sel.value);
     });
     props.append(sel);
@@ -1665,8 +1665,8 @@ function init(root) {
       if (nh) { row(t('app.info.hidden'), String(nh)); btn(t('ui.editmenu.unhide_all'), unhideEverything); }
       const bb = model.bbox();
       if (bb) row(t('app.info.size'), [0, 1, 2].map((k) => formatLength(bb.max[k] - bb.min[k], u)).join(' × '));
-      if (model.guides.size) btn(t('app.info.del_guides'), () => { model.change(t('app.undo.del_guides'), (m) => { m.guides = new Map(); }); host.setSel([]); });
-      if (model.dims.size) btn(t('app.info.del_dims'), () => { model.change(t('app.undo.del_dims'), (m) => { m.dims = new Map(); }); host.setSel([]); });
+      if (model.guides.size) btn(t('app.info.del_guides'), () => { model.change(t('app.undo.del_guides'), (m) => { m.guides = new Map(); }, []); host.setSel([]); });
+      if (model.dims.size) btn(t('app.info.del_dims'), () => { model.change(t('app.undo.del_dims'), (m) => { m.dims = new Map(); }, []); host.setSel([]); });
       ui.info.replaceChildren(props, actions, el('p', { className: 'mc-note' }, t('app.info.note', { unit: unitWords(u) })));
       return;
     }
@@ -1676,7 +1676,7 @@ function init(root) {
     const ci = cid && sel.every((s) => def.edges.get(s.id)?.curve === cid) ? curveInfo(def, cid) : null;
     if (ci && ci.edges.length === sel.length) {
       ui.infoH.textContent = t('app.info.curve.' + (['arc', 'circle', 'polygon'].includes(ci.kind) ? ci.kind : 'curve'));
-      if (ci.round && ci.flat) lenBox(t('app.info.radius'), 'mc-radius', ci.radius, (L) => model.change(t('app.info.radius'), (m) => setCurveRadius(m.context(host.path).def, cid, L)));
+      if (ci.round && ci.flat) lenBox(t('app.info.radius'), 'mc-radius', ci.radius, (L) => model.change(t('app.info.radius'), (m) => setCurveRadius(m.context(host.path).def, cid, L), [model.context(host.path).def.id]));
       else if (ci.round) row(t('app.info.radius'), formatLength(ci.radius, u));
       row(ci.kind === 'polygon' ? t('app.info.sides') : t('app.info.segments'), String(ci.segs));
       if (ci.kind === 'arc' && ci.round) row(t('app.info.angle'), (Math.round((ci.sweep * 180) / Math.PI * 100) / 100) + '°');
@@ -1690,7 +1690,7 @@ function init(root) {
       const f = def.faces.get(sel[0].id);
       ui.infoH.textContent = t('app.info.face');
       if (f) { row(t('app.info.area'), formatArea(faceArea(def, f), u)); row(t('app.info.holes'), String(f.loops.length - 1)); row(t('app.info.color'), colorLabel(f.color)); }
-      btn(t('app.info.reverse'), () => { model.change(t('app.info.reverse'), (m) => reverseFaces(m.context(host.path).def, [sel[0].id])); });
+      btn(t('app.info.reverse'), () => { model.change(t('app.info.reverse'), (m) => reverseFaces(m.context(host.path).def, [sel[0].id]), [model.context(host.path).def.id]); });
     } else if (sel.length === 1 && nE === 1) {
       const e = def.edges.get(sel[0].id);
       ui.infoH.textContent = t('app.info.edge');
@@ -1707,7 +1707,7 @@ function init(root) {
         tagPicker(props, [inst]);
         props.append(el('label', { for: 'mc-defname' }, t('app.info.name')));
         const inp = el('input', { type: 'text', id: 'mc-defname', className: 'mc-input', value: d.name, maxLength: 120 });
-        inp.addEventListener('change', () => { const v = inp.value.trim().slice(0, 120); if (v && v !== d.name) model.change(t('app.scene.rename'), (m) => { m.def(d.id).name = v; }); scheduleInfo(); });
+        inp.addEventListener('change', () => { const v = inp.value.trim().slice(0, 120); if (v && v !== d.name) model.change(t('app.scene.rename'), (m) => { m.def(d.id).name = v; }, [d.id]); scheduleInfo(); });
         props.append(inp);
         if (d.kind === 'component') row(t('app.info.placed'), t('app.info.placed.n', { n: counts.get(d.id) || 0 }));
         const s = solidInfo(d);
@@ -1728,7 +1728,7 @@ function init(root) {
         if (d.dyn) notes.push(el('p', { className: 'mc-note' }, t('app.dyn.is', { name: model.def(d.dyn.src)?.name || '' })));
         btn(t('app.info.edit'), () => host.openContext([...host.path, sel[0].id]));
         btn(t('app.info.explode'), explodeSel);
-        if (d.kind === 'component' && (counts.get(d.id) || 0) > 1) btn(t('app.info.make_unique'), () => { model.change(t('app.info.make_unique'), (m) => m.makeUnique(m.context(host.path).def, sel[0].id)); scheduleInfo(); });
+        if (d.kind === 'component' && (counts.get(d.id) || 0) > 1) btn(t('app.info.make_unique'), () => { model.change(t('app.info.make_unique'), (m) => m.makeUnique(m.context(host.path).def, sel[0].id), [model.context(host.path).def.id]); scheduleInfo(); });
         if (d.kind === 'group') btn(t('app.undo.make_component'), () => { model.change(t('app.undo.make_component'), (m) => { const dd = m.def(d.id); dd.kind = 'component'; dd.name = m.uniqueName(t('app.info.component')); }); scheduleInfo(); });
       }
     } else if (sel.length === 1 && nD === 1) {
@@ -1742,7 +1742,7 @@ function init(root) {
         props.append(el('label', { for: 'mc-dimkind' }, t('app.info.dim.show')));
         const ks = el('select', { id: 'mc-dimkind', className: 'mc-select' }, el('option', { value: 'rad' }, t('app.info.radius')), el('option', { value: 'dia' }, t('app.info.diameter')));
         ks.value = dm.kind;
-        ks.addEventListener('change', () => { model.change(t('app.undo.dim_kind'), (m) => { m.dims.get(id).kind = ks.value; }); scheduleInfo(); });
+        ks.addEventListener('change', () => { model.change(t('app.undo.dim_kind'), (m) => { m.dims.get(id).kind = ks.value; }, []); scheduleInfo(); });
         props.append(ks);
         notes.push(el('p', { className: 'mc-note' }, t(!g?.live ? 'app.info.dim.rad_gone' : g.flat ? 'app.info.dim.rad_note' : 'app.info.dim.rad_fixed')));
       } else if (dm?.kind === 'ang') {
@@ -1756,7 +1756,7 @@ function init(root) {
         const mv = el('select', { id: 'mc-dimmove', className: 'mc-select' },
           el('option', { value: 'b' }, t('app.info.dim.b')), el('option', { value: 'a' }, t('app.info.dim.a')), el('option', { value: 'both' }, t('app.info.dim.both')));
         mv.value = dm.move;
-        mv.addEventListener('change', () => { model.change(t('app.undo.dim_end'), (m) => { m.dims.get(id).move = mv.value; }); scheduleInfo(); });
+        mv.addEventListener('change', () => { model.change(t('app.undo.dim_end'), (m) => { m.dims.get(id).move = mv.value; }, []); scheduleInfo(); });
         props.append(mv);
         notes.push(el('p', { className: 'mc-note' }, attached
           ? t('app.info.dim.note')
@@ -1770,11 +1770,11 @@ function init(root) {
       if (sp) {
         props.append(el('label', { for: 'mc-secname' }, t('app.info.name')));
         const nm = el('input', { type: 'text', id: 'mc-secname', className: 'mc-input', value: sp.name, maxLength: 80 });
-        nm.addEventListener('change', () => { const v = nm.value.trim().slice(0, 80); if (v && v !== sp.name) model.change(t('app.scene.rename'), (m) => { m.sections.get(id).name = v; }); scheduleInfo(); });
+        nm.addEventListener('change', () => { const v = nm.value.trim().slice(0, 80); if (v && v !== sp.name) model.change(t('app.scene.rename'), (m) => { m.sections.get(id).name = v; }, []); scheduleInfo(); });
         props.append(nm);
         props.append(el('span', { className: 'k' }, t('app.info.section.cut')));
         const act = el('input', { type: 'checkbox', id: 'mc-secact', checked: model.activeSection === id });
-        act.addEventListener('change', () => { model.change(t('app.undo.sec_active'), (m) => { m.activeSection = act.checked ? id : null; if (act.checked) m.sectionView.cuts = true; }); syncSectionMenu(); afterHistory(); });
+        act.addEventListener('change', () => { model.change(t('app.undo.sec_active'), (m) => { m.activeSection = act.checked ? id : null; if (act.checked) m.sectionView.cuts = true; }, []); syncSectionMenu(); afterHistory(); });
         props.append(el('label', { className: 'mc-check' }, act, ' ' + t('app.info.section.active')));
         // its place along the arrows, from the model's origin: retype to slide it through the model
         const at = dot(sp.p, sp.n);
@@ -1784,13 +1784,13 @@ function init(root) {
           // a length, which may be below zero (the far side of the origin)
           const neg = /^\s*-/.test(inp.value), L0 = parseLength(inp.value.replace(/^\s*-/, ''), u), L = L0 === null ? null : neg ? -L0 : L0;
           if (L === null || !Number.isFinite(L)) { print(t('app.len.bad')); inp.value = formatLength(at, u); return; }
-          model.change(t('app.undo.sec_move'), (m) => { const s = m.sections.get(id); s.p = add(s.p, mul(s.n, L - dot(s.p, s.n))); });
+          model.change(t('app.undo.sec_move'), (m) => { const s = m.sections.get(id); s.p = add(s.p, mul(s.n, L - dot(s.p, s.n))); }, []);
           print(t('app.sec.moved', { name: sp.name, len: formatLength(L, u) }));
           afterHistory();
         });
         props.append(inp);
         notes.push(el('p', { className: 'mc-note' }, t('app.info.section.note')));
-        btn(t('app.info.section.reverse'), () => { model.change(t('app.undo.sec_reverse'), (m) => { const s = m.sections.get(id); s.n = mul(s.n, -1); }); afterHistory(); });
+        btn(t('app.info.section.reverse'), () => { model.change(t('app.undo.sec_reverse'), (m) => { const s = m.sections.get(id); s.n = mul(s.n, -1); }, []); afterHistory(); });
       }
       btn(t('app.info.delete'), eraseSelection);
     } else if (sel.length === 1 && nG === 1) {
@@ -2067,7 +2067,7 @@ function init(root) {
           unit = await ask({ title: t('app.import.units.h'), text: t('app.import.units.text', { kind: ext.toUpperCase() }), buttons: [['cancel', t('app.btn.cancel'), 'btn-line'], ['in', t('app.import.units.in'), 'btn-line'], ['ft', t('app.import.units.ft'), 'btn-line'], ['mm', t('app.import.units.mm'), 'btn-line'], ['m', t('app.import.units.m'), 'btn-plot']] });
           if (unit === 'cancel') return;
         }
-        r = model.change(t('app.undo.import_site'), (m) => { const x = read(m, { unit: unit || undefined }); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        r = model.change(t('app.undo.import_site'), (m) => { const x = read(m, { unit: unit || undefined }); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         const R = r.report;
         if (!r.def.edges.size) print(t('app.import.site.empty', { file: file.name }) + skipped(R));
         else print(t('app.import.site', { file: file.name, edges: r.def.edges.size }) + (r.def.faces.size ? ' ' + t('app.import.site.faces', { n: r.def.faces.size }) : '') + (R.texts ? ' ' + t('app.import.site.texts', { n: R.texts }) : '') + ' ' + t('app.import.site.group') + skipped(R) + dynamicNote(dwgModel));
@@ -2078,7 +2078,7 @@ function init(root) {
         const [{ readSkp }, { importSKP }] = await Promise.all([import('./skp/read.js'), import('./skp-import.js')]);
         await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
         const skp = await readSkp(bytes);
-        r = model.change(t('app.undo.import_skp'), (m) => { const x = importSKP(m, skp, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        r = model.change(t('app.undo.import_skp'), (m) => { const x = importSKP(m, skp, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         const rep = r.report;
         print(t('app.import.skp.done', { file: file.name, version: rep.version, faces: rep.faces, n: rep.components })
           + (rep.tags ? ' ' + t('app.import.skp.tags', { n: rep.tags }) : '')
@@ -2088,18 +2088,18 @@ function init(root) {
           + (rep.textured > (rep.texturedKept || 0) ? ' ' + t('app.import.skp.textures', { n: rep.textured - (rep.texturedKept || 0) }) : '') + skipped(rep));
       } else if (ext === 'dae') {
         const text = await file.text();
-        r = model.change(t('app.undo.import_dae'), (m) => { const x = importDAE(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        r = model.change(t('app.undo.import_dae'), (m) => { const x = importDAE(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         const rep = r.report;
         const conv = [rep.up !== 'Z_UP' && t('app.import.dae.up', { axis: rep.up === 'Y_UP' ? 'Y' : 'X' }), rep.meter !== 1 && t('app.import.dae.unit', { m: rep.meter })].filter(Boolean);
         print((rep.components ? t('app.import.dae.comps', { file: file.name, faces: rep.faces, n: rep.components }) : t('app.import.dae', { file: file.name, n: rep.faces }))
           + (conv.length ? ' ' + t('app.import.dae.converted', { how: conv.join(', ') }) : '') + skipped(rep));
       } else if (ext === 'obj') {
         const text = await file.text();
-        r = model.change(t('app.undo.import_obj'), (m) => { const x = importOBJ(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        r = model.change(t('app.undo.import_obj'), (m) => { const x = importOBJ(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         print(t('app.import.dae', { file: file.name, n: r.def.faces.size }) + skipped(r.report));
       } else {
         const bytes = await bytesOf(file);
-        r = model.change(t('app.undo.import_gltf'), (m) => { const x = importGLTF(m, bytes, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; });
+        r = model.change(t('app.undo.import_gltf'), (m) => { const x = importGLTF(m, bytes, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         print(t('app.import.dae', { file: file.name, n: r.def.faces.size }) + skipped(r.report));
       }
       const iid = [...ctxDef().insts.keys()].pop();
@@ -2362,7 +2362,7 @@ function init(root) {
     dlg.addEventListener('close', () => {
       dlg.remove(); focusView();
       if (!next) return;
-      model.change(t('app.undo.storeys'), (m) => { m.storeys = next; });
+      model.change(t('app.undo.storeys'), (m) => { m.storeys = next; }, []);
       print(next.length ? t('app.storeys.saved', { n: next.length }) : t('app.storeys.none'));
     });
     root.append(dlg);
